@@ -8,15 +8,22 @@ readme.workspace = true
 # TODO: set public repository/homepage/documentation URLs before publishing.
 
 [features]
-testing = []
+testing = ["dep:criterion", "dep:tokio", "dep:futures"]
 
 [dependencies]
+criterion = { version = "0.5", features = ["async_tokio"], optional = true }
+futures = { version = "0.3", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, optional = true }
 ulid = { version = "1", features = ["serde"] }
 wee-events-macros = { path = "../wee-events-macros" }
 
 [dev-dependencies]
 wee-events = { path = ".", features = ["testing"] }
 tokio = { workspace = true }
+
+[[bench]]
+name = "memory_store"
+harness = false
