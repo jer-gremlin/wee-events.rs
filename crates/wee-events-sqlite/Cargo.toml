@@ -18,7 +18,12 @@ thiserror = { workspace = true }
 data-encoding = "2"
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
 wee-events = { path = "../wee-events", features = ["testing"] }
 tempfile = "3"
 testcontainers = "0.25"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+
+[[bench]]
+name = "sqlite_store"
+harness = false

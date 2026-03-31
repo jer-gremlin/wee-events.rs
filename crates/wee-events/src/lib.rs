@@ -9,6 +9,8 @@ mod renderer;
 mod store;
 
 #[cfg(any(test, feature = "testing"))]
+mod bench_suite;
+#[cfg(any(test, feature = "testing"))]
 mod test_suite;
 
 pub use aggregate::Aggregate;
@@ -30,6 +32,8 @@ pub mod memory {
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
+    pub use crate::bench_suite::*;
+    pub use crate::store_bench_suite;
     pub use crate::store_test_suite;
     pub use crate::test_suite::*;
 }
