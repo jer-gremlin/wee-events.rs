@@ -2,6 +2,8 @@ mod backends;
 mod partitioning;
 mod store;
 mod strategies;
+#[cfg(feature = "turso")]
+pub(crate) mod turso_platform;
 mod types;
 
 pub type SqliteEventStore<

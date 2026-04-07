@@ -15,4 +15,6 @@ pub use event_store::{
     SingleTargetProvisioner, SqldDefaultProvisioner, SqldNamespacedPartitionStrategy,
     SqldNamespacedProvisioner, SqliteEventStore, TursoProvisioner, TypePartition, TypeStrategy,
 };
+#[cfg(feature = "turso")]
+pub use event_store::turso_platform::{TursoPlatformConfig, TursoPlatformProvisioner};
 pub use projections::{apply_projection, rebuild_projection};
