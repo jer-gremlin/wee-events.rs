@@ -131,6 +131,45 @@ impl<A: TursoPlatformApi> TursoPlatformProvisioner<A> {
         }
     }
 
+    /// Delete all databases created by this provisioner (tracked in cache).
+    /// Also deletes any databases matching the prefix found via the API.
+    pub async fn cleanup(&self) -> Result<(), Error> {
+        // Collect names from cache
+        let cached: Vec<String> = self.cache.lock().unwrap().keys().cloned().collect();
+
+        // Also list from API to catch databases from previous runs
+        let api_dbs = self
+            .api
+            .list_databases(&self.group)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+
+        let prefix_match = format!("{}-", self.prefix);
+        let mut to_delete: HashSet<String> = cached.into_iter().collect();
+        // Include the bare prefix database (Default partition)
+        if self.cache.lock().unwrap().contains_key(&self.prefix) {
+            to_delete.insert(self.prefix.clone());
+        }
+        for db in &api_dbs {
+            if db.name == self.prefix || db.name.starts_with(&prefix_match) {
+                to_delete.insert(db.name.clone());
+            }
+        }
+
+        for name in &to_delete {
+            self.api
+                .delete_database(name)
+                .await
+                .map_err(|e| Error::Internal(format!("failed to delete {name}: {e}")))?;
+        }
+
+        // Clear caches
+        self.cache.lock().unwrap().clear();
+        self.known_names.lock().unwrap().clear();
+
+        Ok(())
+    }
+
     fn db_name_for(&self, name: PartitionName<'_>) -> String {
         match name {
             PartitionName::Default => sanitize_database_name("", &self.prefix),
