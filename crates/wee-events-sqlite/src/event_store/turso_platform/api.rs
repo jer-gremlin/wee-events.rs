@@ -38,6 +38,7 @@ pub trait TursoPlatformApi: Send + Sync {
     async fn create_database(&self, name: &str, group: &str) -> Result<DatabaseInfo, ApiError>;
     async fn get_database(&self, name: &str) -> Result<Option<DatabaseInfo>, ApiError>;
     async fn list_databases(&self, group: &str) -> Result<Vec<DatabaseInfo>, ApiError>;
+    async fn delete_database(&self, name: &str) -> Result<(), ApiError>;
 }
 
 impl<T: TursoPlatformApi> TursoPlatformApi for std::sync::Arc<T> {
@@ -49,6 +50,9 @@ impl<T: TursoPlatformApi> TursoPlatformApi for std::sync::Arc<T> {
     }
     async fn list_databases(&self, group: &str) -> Result<Vec<DatabaseInfo>, ApiError> {
         (**self).list_databases(group).await
+    }
+    async fn delete_database(&self, name: &str) -> Result<(), ApiError> {
+        (**self).delete_database(name).await
     }
 }
 
@@ -109,6 +113,11 @@ pub(crate) mod fake {
         async fn list_databases(&self, _group: &str) -> Result<Vec<DatabaseInfo>, ApiError> {
             self.list_calls.fetch_add(1, Ordering::Relaxed);
             Ok(self.databases.lock().unwrap().values().cloned().collect())
+        }
+
+        async fn delete_database(&self, name: &str) -> Result<(), ApiError> {
+            self.databases.lock().unwrap().remove(name);
+            Ok(())
         }
     }
 }
@@ -257,6 +266,29 @@ impl TursoPlatformApi for TursoHttpClient {
                     })
                     .collect())
             }
+            401 | 403 => {
+                let body = response.text().await.unwrap_or_default();
+                Err(ApiError::AuthFailure(body))
+            }
+            status => {
+                let body = response.text().await.unwrap_or_default();
+                Err(ApiError::Unexpected(format!("status {status}: {body}")))
+            }
+        }
+    }
+
+    async fn delete_database(&self, name: &str) -> Result<(), ApiError> {
+        let response = self
+            .client
+            .delete(self.url(&format!("/databases/{name}")))
+            .bearer_auth(&self.api_token)
+            .send()
+            .await
+            .map_err(|e| ApiError::Unexpected(format!("request failed: {e}")))?;
+
+        match response.status().as_u16() {
+            200 => Ok(()),
+            404 => Ok(()), // already gone
             401 | 403 => {
                 let body = response.text().await.unwrap_or_default();
                 Err(ApiError::AuthFailure(body))

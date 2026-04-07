@@ -1,14 +1,14 @@
 /// Sanitize a partition name into a valid Turso database name.
 ///
 /// Turso database names allow only lowercase letters, digits, and dashes,
-/// with a maximum length of 64 characters. The result is `{prefix}-{sanitized}`.
+/// with a maximum length of 51 characters. The result is `{prefix}-{sanitized}`.
 pub(crate) fn sanitize_database_name(partition_name: &str, prefix: &str) -> String {
     if partition_name.is_empty() {
         return prefix.to_string();
     }
 
     let raw = format!("{prefix}-{partition_name}");
-    let mut result = String::with_capacity(64);
+    let mut result = String::with_capacity(51);
     let mut prev_dash = false;
 
     for c in raw.chars() {
@@ -30,7 +30,7 @@ pub(crate) fn sanitize_database_name(partition_name: &str, prefix: &str) -> Stri
             }
         };
         result.push(out);
-        if result.len() >= 64 {
+        if result.len() >= 51 {
             break;
         }
     }
@@ -81,10 +81,10 @@ mod tests {
     }
 
     #[test]
-    fn long_names_are_truncated_to_64_chars() {
+    fn long_names_are_truncated_to_51_chars() {
         let long_name = "a".repeat(100);
         let result = sanitize_database_name(&long_name, "myapp");
-        assert!(result.len() <= 64);
+        assert!(result.len() <= 51);
         assert!(result.starts_with("myapp-"));
     }
 

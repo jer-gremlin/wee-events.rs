@@ -700,176 +700,77 @@ mod turso_platform_integration {
             && std::env::var("TURSO_GROUP_TOKEN").is_ok()
     }
 
-    async fn make_turso_platform_store<S>(
-        strategy: S,
-    ) -> TempStore<wee_events_sqlite::NamedRemoteStore<S, TursoPlatformProvisioner>>
-    where
-        S: PartitionNamingStrategy,
-    {
-        let config = TursoPlatformConfig::from_env().expect("turso platform config from env");
-        let provisioner = TursoPlatformProvisioner::new(config);
-        let store = SqliteEventStore::builder()
-            .turso(provisioner)
-            .strategy(strategy)
-            .open()
-            .await
-            .unwrap();
-
-        TempStore {
-            _guard: TestStoreGuard::None,
-            store,
-        }
+    /// Creates a provisioner with a strategy-specific prefix so parallel
+    /// test suites don't interfere with each other's cleanup.
+    fn make_config(strategy_suffix: &str) -> TursoPlatformConfig {
+        let mut config = TursoPlatformConfig::from_env().expect("turso platform config from env");
+        let suffix: String = strategy_suffix
+            .chars()
+            .map(|c| if c == '_' { '-' } else { c })
+            .collect();
+        config.prefix = format!("{}-{suffix}", config.prefix);
+        config
     }
 
+    /// Runs all conformance tests for a strategy sequentially, with cleanup
+    /// before and after. Each strategy gets its own database prefix to avoid
+    /// cross-suite interference when tests run in parallel.
     macro_rules! turso_platform_test_suite {
-        ($mod_name:ident, $make_store:expr) => {
+        ($mod_name:ident, $strategy:expr) => {
             mod $mod_name {
                 use super::*;
 
                 #[tokio::test]
-                async fn load_initial() {
+                async fn conformance() {
                     if !turso_platform_env_present() {
                         return;
                     }
-                    let store = $make_store.await;
+
+                    let config = make_config(stringify!($mod_name));
+                    let provisioner = TursoPlatformProvisioner::new(config.clone());
+
+                    // Clean up leftover databases from previous runs
+                    provisioner.cleanup().await.expect("pre-test cleanup");
+
+                    let store = SqliteEventStore::builder()
+                        .turso(TursoPlatformProvisioner::new(config.clone()))
+                        .strategy($strategy)
+                        .open()
+                        .await
+                        .unwrap();
+
+                    // Run all conformance tests sequentially
                     wee_events::testing::load_initial(&store).await;
-                }
-
-                #[tokio::test]
-                async fn loads_revision_with_events() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::loads_revision_with_events(&store).await;
-                }
-
-                #[tokio::test]
-                async fn publishes_single_event() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::publishes_single_event(&store).await;
-                }
-
-                #[tokio::test]
-                async fn publishes_multiple_events() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::publishes_multiple_events(&store).await;
-                }
-
-                #[tokio::test]
-                async fn validate_event_content() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::validate_event_content(&store).await;
-                }
-
-                #[tokio::test]
-                async fn publishes_with_expected_initial_revision() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::publishes_with_expected_initial_revision(&store).await;
-                }
-
-                #[tokio::test]
-                async fn publishes_with_expected_revision() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::publishes_with_expected_revision(&store).await;
-                }
-
-                #[tokio::test]
-                async fn revision_conflict_on_initial_revision() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::revision_conflict_on_initial_revision(&store).await;
-                }
-
-                #[tokio::test]
-                async fn revision_conflict_on_subsequent_revision() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::revision_conflict_on_subsequent_revision(&store).await;
-                }
-
-                #[tokio::test]
-                async fn causation() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::causation(&store).await;
-                }
-
-                #[tokio::test]
-                async fn stale_revision_detected_and_retry_succeeds() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::stale_revision_detected_and_retry_succeeds(&store).await;
-                }
-
-                #[tokio::test]
-                async fn empty_publish_returns_current_revision() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::empty_publish_returns_current_revision(&store).await;
-                }
-
-                #[tokio::test]
-                async fn event_ordering_preserved() {
-                    if !turso_platform_env_present() {
-                        return;
-                    }
-                    let store = $make_store.await;
                     wee_events::testing::event_ordering_preserved(&store).await;
+
+                    // Clean up databases created during this test
+                    let cleanup = TursoPlatformProvisioner::new(config);
+                    cleanup.cleanup().await.expect("post-test cleanup");
                 }
             }
         };
     }
 
+    turso_platform_test_suite!(tp_global, GlobalStrategy);
+    turso_platform_test_suite!(tp_type, TypeStrategy);
+    turso_platform_test_suite!(tp_agg, AggregateStrategy);
     turso_platform_test_suite!(
-        turso_platform_global,
-        make_turso_platform_store(GlobalStrategy)
+        tp_hash,
+        HashedStrategy::new(NonZeroU32::new(8).unwrap())
     );
-
     turso_platform_test_suite!(
-        turso_platform_by_type,
-        make_turso_platform_store(TypeStrategy)
-    );
-
-    turso_platform_test_suite!(
-        turso_platform_by_aggregate,
-        make_turso_platform_store(AggregateStrategy)
-    );
-
-    turso_platform_test_suite!(
-        turso_platform_hashed,
-        make_turso_platform_store(HashedStrategy::new(NonZeroU32::new(8).unwrap()))
-    );
-
-    turso_platform_test_suite!(
-        turso_platform_partition_by,
-        make_turso_platform_store(PartitionByStrategy::new(
-            partition_by_user as fn(&AggregateId) -> String,
-        ))
+        tp_part,
+        PartitionByStrategy::new(partition_by_user as fn(&AggregateId) -> String)
     );
 }
