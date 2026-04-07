@@ -700,11 +700,12 @@ mod turso_platform_integration {
             && std::env::var("TURSO_GROUP_TOKEN").is_ok()
     }
 
-    async fn make_turso_platform_store(
-        strategy: GlobalStrategy,
-    ) -> TempStore<
-        wee_events_sqlite::NamedRemoteStore<GlobalStrategy, TursoPlatformProvisioner>,
-    > {
+    async fn make_turso_platform_store<S>(
+        strategy: S,
+    ) -> TempStore<wee_events_sqlite::NamedRemoteStore<S, TursoPlatformProvisioner>>
+    where
+        S: PartitionNamingStrategy,
+    {
         let config = TursoPlatformConfig::from_env().expect("turso platform config from env");
         let provisioner = TursoPlatformProvisioner::new(config);
         let store = SqliteEventStore::builder()
@@ -848,5 +849,27 @@ mod turso_platform_integration {
     turso_platform_test_suite!(
         turso_platform_global,
         make_turso_platform_store(GlobalStrategy)
+    );
+
+    turso_platform_test_suite!(
+        turso_platform_by_type,
+        make_turso_platform_store(TypeStrategy)
+    );
+
+    turso_platform_test_suite!(
+        turso_platform_by_aggregate,
+        make_turso_platform_store(AggregateStrategy)
+    );
+
+    turso_platform_test_suite!(
+        turso_platform_hashed,
+        make_turso_platform_store(HashedStrategy::new(NonZeroU32::new(8).unwrap()))
+    );
+
+    turso_platform_test_suite!(
+        turso_platform_partition_by,
+        make_turso_platform_store(PartitionByStrategy::new(
+            partition_by_user as fn(&AggregateId) -> String,
+        ))
     );
 }
