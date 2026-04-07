@@ -684,3 +684,169 @@ fn sanitize(input: &str) -> String {
         })
         .collect()
 }
+
+// ===========================================================================
+// Turso Platform API integration tests (env-gated)
+// ===========================================================================
+
+#[cfg(feature = "turso")]
+mod turso_platform_integration {
+    use super::*;
+    use wee_events_sqlite::{TursoPlatformConfig, TursoPlatformProvisioner};
+
+    fn turso_platform_env_present() -> bool {
+        std::env::var("TURSO_ORG").is_ok()
+            && std::env::var("TURSO_API_TOKEN").is_ok()
+            && std::env::var("TURSO_GROUP_TOKEN").is_ok()
+    }
+
+    async fn make_turso_platform_store(
+        strategy: GlobalStrategy,
+    ) -> TempStore<
+        wee_events_sqlite::NamedRemoteStore<GlobalStrategy, TursoPlatformProvisioner>,
+    > {
+        let config = TursoPlatformConfig::from_env().expect("turso platform config from env");
+        let provisioner = TursoPlatformProvisioner::new(config);
+        let store = SqliteEventStore::builder()
+            .turso(provisioner)
+            .strategy(strategy)
+            .open()
+            .await
+            .unwrap();
+
+        TempStore {
+            _guard: TestStoreGuard::None,
+            store,
+        }
+    }
+
+    macro_rules! turso_platform_test_suite {
+        ($mod_name:ident, $make_store:expr) => {
+            mod $mod_name {
+                use super::*;
+
+                #[tokio::test]
+                async fn load_initial() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::load_initial(&store).await;
+                }
+
+                #[tokio::test]
+                async fn loads_revision_with_events() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::loads_revision_with_events(&store).await;
+                }
+
+                #[tokio::test]
+                async fn publishes_single_event() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::publishes_single_event(&store).await;
+                }
+
+                #[tokio::test]
+                async fn publishes_multiple_events() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::publishes_multiple_events(&store).await;
+                }
+
+                #[tokio::test]
+                async fn validate_event_content() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::validate_event_content(&store).await;
+                }
+
+                #[tokio::test]
+                async fn publishes_with_expected_initial_revision() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::publishes_with_expected_initial_revision(&store).await;
+                }
+
+                #[tokio::test]
+                async fn publishes_with_expected_revision() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::publishes_with_expected_revision(&store).await;
+                }
+
+                #[tokio::test]
+                async fn revision_conflict_on_initial_revision() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::revision_conflict_on_initial_revision(&store).await;
+                }
+
+                #[tokio::test]
+                async fn revision_conflict_on_subsequent_revision() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::revision_conflict_on_subsequent_revision(&store).await;
+                }
+
+                #[tokio::test]
+                async fn causation() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::causation(&store).await;
+                }
+
+                #[tokio::test]
+                async fn stale_revision_detected_and_retry_succeeds() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::stale_revision_detected_and_retry_succeeds(&store).await;
+                }
+
+                #[tokio::test]
+                async fn empty_publish_returns_current_revision() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::empty_publish_returns_current_revision(&store).await;
+                }
+
+                #[tokio::test]
+                async fn event_ordering_preserved() {
+                    if !turso_platform_env_present() {
+                        return;
+                    }
+                    let store = $make_store.await;
+                    wee_events::testing::event_ordering_preserved(&store).await;
+                }
+            }
+        };
+    }
+
+    turso_platform_test_suite!(
+        turso_platform_global,
+        make_turso_platform_store(GlobalStrategy)
+    );
+}

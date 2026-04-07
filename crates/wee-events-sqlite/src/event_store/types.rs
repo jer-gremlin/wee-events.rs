@@ -98,9 +98,12 @@ pub trait SqldNamespacedProvisioner: NamedTargetProvisioner {}
 
 /// Provisioner for Turso databases addressed by logical partition name.
 ///
-/// This matches Turso's Multi-DB Schema pattern: the event-store partition name
-/// is the stable backend-facing key, and the provisioner maps that key to a
-/// concrete Turso database URL.
+/// The event-store partition name is the stable backend-facing key, and the
+/// provisioner maps that key to a concrete Turso database URL. Each partition
+/// gets its own database, created on demand via the Turso Platform API.
+///
+/// Enable the `turso` feature for a ready-to-use implementation:
+/// [`TursoPlatformProvisioner`](crate::TursoPlatformProvisioner).
 pub trait TursoProvisioner: NamedTargetProvisioner {}
 
 #[cfg(test)]
