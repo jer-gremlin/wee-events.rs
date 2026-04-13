@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use restate_sdk::prelude::*;
 
-use crate::service::ErasedService;
+use crate::service::JsonService;
 use crate::types::ExecuteResponse;
 use wee_events::AggregateId;
 
@@ -11,7 +11,7 @@ pub struct Loader<T> {
     service_name: String,
 }
 
-impl<T: ErasedService> Loader<T> {
+impl<T: JsonService> Loader<T> {
     pub fn new(service_name: impl Into<String>, service: Arc<T>) -> Self {
         Self {
             service,

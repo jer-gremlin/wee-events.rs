@@ -11,7 +11,7 @@ pub use effects::{EffectRunner, SideEffect, SideEffectFilter};
 pub use endpoint::ServiceBundle;
 pub use executor::Executor;
 pub use loader::Loader;
-pub use service::{ErasedService, ServiceAdapter, ServiceResponse};
+pub use service::{JsonService, ServiceAdapter, ServiceResponse};
 pub use types::{
     CommandRequest, ExecuteNotification, ExecuteRequest, ExecuteResponse, Metadata,
 };

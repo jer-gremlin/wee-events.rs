@@ -9,12 +9,12 @@ pub struct ServiceResponse {
     pub state: serde_json::Value,
 }
 
-/// Type-erased service interface that operates on JSON values.
+/// Service interface that operates on JSON values.
 ///
-/// Erases the state type `S` by serializing to JSON at the boundary.
-/// Used with static dispatch — no `dyn` needed.
+/// Serializes the state type `S` to JSON at the boundary so Restate
+/// components don't need to be generic over the domain state type.
 #[allow(async_fn_in_trait)]
-pub trait ErasedService: Send + Sync {
+pub trait JsonService: Send + Sync {
     async fn load(&self, id: &AggregateId) -> Result<ServiceResponse, wee_events::Error>;
     async fn execute(
         &self,
@@ -24,7 +24,7 @@ pub trait ErasedService: Send + Sync {
     ) -> Result<ServiceResponse, wee_events::Error>;
 }
 
-/// Adapts a concrete `EntityLoader<S> + CommandExecutor<S>` into `ErasedService`
+/// Adapts a concrete `EntityLoader<S> + CommandExecutor<S>` into `JsonService`
 /// by serializing state to JSON.
 pub struct ServiceAdapter<S, T> {
     inner: T,
@@ -40,7 +40,7 @@ impl<S, T> ServiceAdapter<S, T> {
     }
 }
 
-impl<S, T> ErasedService for ServiceAdapter<S, T>
+impl<S, T> JsonService for ServiceAdapter<S, T>
 where
     S: Default + serde::Serialize + Send + Sync,
     T: wee_events::EntityLoader<S> + wee_events::CommandExecutor<S>,
