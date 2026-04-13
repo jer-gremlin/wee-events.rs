@@ -1,8 +1,11 @@
+use crate::entity::Entity;
+use crate::id::{AggregateId, CommandName};
+
 /// A structured rejection from the domain layer. Indicates a command was
 /// refused by business logic (as opposed to an infrastructure failure).
 ///
 /// Carries a machine-readable code, human message, and arbitrary JSON context.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct Rejection {
     pub code: String,
@@ -36,3 +39,42 @@ impl Rejection {
         }
     }
 }
+
+/// Loads projected entity state for an aggregate.
+///
+/// This is the "read" half of a service — given an aggregate ID, return
+/// the current projected state. Implementations typically load from an
+/// EventStore and render through a Renderer.
+#[allow(async_fn_in_trait)]
+pub trait EntityLoader<S>: Send + Sync {
+    async fn load(&self, id: &AggregateId) -> crate::Result<Entity<S>>;
+}
+
+/// Executes a named command against a target aggregate, returning the
+/// updated projected state.
+///
+/// Takes an untyped `serde_json::Value` payload — this is the
+/// service-boundary interface. Typed command dispatch (validation,
+/// deserialization into concrete command enums) happens inside
+/// implementations.
+///
+/// Returns `crate::Result` so implementations can propagate both
+/// infrastructure errors (store failures, serialization) and domain
+/// rejections (`Error::Rejection`). Callers distinguish the two by
+/// pattern-matching on the `Error` enum.
+#[allow(async_fn_in_trait)]
+pub trait CommandExecutor<S>: Send + Sync {
+    async fn execute(
+        &self,
+        name: &CommandName,
+        target: &AggregateId,
+        command: serde_json::Value,
+    ) -> crate::Result<Entity<S>>;
+}
+
+/// A service combines entity loading with command execution.
+///
+/// Blanket-implemented for any type that implements both `EntityLoader<S>`
+/// and `CommandExecutor<S>`.
+pub trait Service<S>: EntityLoader<S> + CommandExecutor<S> {}
+impl<S, T: EntityLoader<S> + CommandExecutor<S>> Service<S> for T {}

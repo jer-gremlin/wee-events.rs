@@ -22,6 +22,7 @@ pub enum Error {
     #[error(transparent)]
     Store(Box<dyn std::error::Error + Send + Sync>),
 
+    /// Domain-level rejection from a command handler.
     #[error(transparent)]
     Rejection(#[from] crate::service::Rejection),
 }

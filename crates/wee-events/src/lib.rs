@@ -18,13 +18,13 @@ pub use aggregate::Aggregate;
 pub use command::Command;
 pub use entity::Entity;
 pub use error::Error;
-pub use service::Rejection;
 pub use event::{ChangeSet, DomainEvent, EventData, EventMetadata, RecordedEvent};
 pub use id::{
     AggregateId, AggregateIdParseError, AggregateType, CommandName, CorrelationId, EventId,
     EventType, Revision,
 };
 pub use renderer::{ReduceFn, Renderer};
+pub use service::{CommandExecutor, EntityLoader, Rejection, Service};
 pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{Command, DomainEvent};
 
