@@ -1,5 +1,6 @@
 use wee_events::CommandName;
 
+use crate::names;
 use crate::types::ExecuteNotification;
 
 pub enum SideEffectFilter {
@@ -20,12 +21,12 @@ impl SideEffectFilter {
     }
 }
 
-pub struct SideEffect {
+pub struct EffectTrigger {
     pub workflow_name: String,
     pub filter: SideEffectFilter,
 }
 
-impl SideEffect {
+impl EffectTrigger {
     pub fn new(workflow_name: impl Into<String>) -> Self {
         Self {
             workflow_name: workflow_name.into(),
@@ -41,13 +42,13 @@ impl SideEffect {
     }
 }
 
-pub struct EffectRunner {
-    pub(crate) effects: Vec<SideEffect>,
+pub struct EffectRouter {
+    pub(crate) effects: Vec<EffectTrigger>,
     service_name: String,
 }
 
-impl EffectRunner {
-    pub fn new(service_name: impl Into<String>, effects: Vec<SideEffect>) -> Self {
+impl EffectRouter {
+    pub fn new(service_name: impl Into<String>, effects: Vec<EffectTrigger>) -> Self {
         Self {
             effects,
             service_name: service_name.into(),
@@ -63,14 +64,14 @@ impl EffectRunner {
     }
 
     pub fn runner_name(&self) -> String {
-        format!("{}-side-effect-runner", self.service_name)
+        names::runner_name(&self.service_name)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{CommandRequest, ExecuteResponse, Metadata};
+    use crate::types::{CommandRequest, EntityResponse, Metadata};
     use wee_events::{AggregateId, Revision};
 
     fn test_notification(command_name: &str) -> ExecuteNotification {
@@ -80,7 +81,7 @@ mod tests {
                 target: AggregateId::new("test", "1"),
                 command: serde_json::json!({}),
             },
-            response: ExecuteResponse {
+            response: EntityResponse {
                 aggregate: AggregateId::new("test", "1"),
                 revision: Revision::zero(),
                 state: serde_json::json!({}),
@@ -125,12 +126,12 @@ mod tests {
     }
 
     #[test]
-    fn runner_matching_effects_filters_correctly() {
-        let runner = EffectRunner::new(
+    fn router_matching_effects_filters_correctly() {
+        let router = EffectRouter::new(
             "test",
             vec![
-                SideEffect::new("audit-log"),
-                SideEffect::with_filter(
+                EffectTrigger::new("audit-log"),
+                EffectTrigger::with_filter(
                     "notifications",
                     SideEffectFilter::Name(CommandName::from("create")),
                 ),
@@ -138,9 +139,9 @@ mod tests {
         );
 
         let create = test_notification("create");
-        assert_eq!(runner.matching_effects(&create), vec!["audit-log", "notifications"]);
+        assert_eq!(router.matching_effects(&create), vec!["audit-log", "notifications"]);
 
         let delete = test_notification("delete");
-        assert_eq!(runner.matching_effects(&delete), vec!["audit-log"]);
+        assert_eq!(router.matching_effects(&delete), vec!["audit-log"]);
     }
 }
