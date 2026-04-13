@@ -11,22 +11,29 @@ It is part of the `wee-events` family alongside the original
 ## Features
 
 - **Compact event-sourcing core**: aggregate, event, command, renderer, and store primitives.
+- **Service traits**: `EntityLoader`, `CommandExecutor`, and `Service` for building command-handling services over any store backend.
+- **Command dispatcher**: typed handler registration with capability-trait context injection (Effect-TS `R` pattern).
+- **Domain service**: composes Dispatcher + Store + Renderer into a full `Service<S>` implementation.
+- **Structured rejections**: `Rejection` error type for domain/business logic failures, distinct from infrastructure errors.
 - **Typed identifiers**: dedicated types for aggregate IDs, event IDs, revisions, and names.
 - **Derive macros**: `Command` and `DomainEvent` derives generate consistent names from enums.
 - **In-memory store**: useful for tests and lightweight workflows.
 - **SQLite store**: append-only event persistence with document storage and projection helpers.
+- **Restate executor**: durable command execution and side-effect dispatch via the Restate SDK.
 - **Store conformance tests**: shared test support for event store implementations.
 
 ## Crates
 
-- `crates/wee-events`: core types, traits, renderer support, and an in-memory store
+- `crates/wee-events`: core types, traits (`EventStore`, `EntityLoader`, `CommandExecutor`, `Service`, `Dispatcher`, `DomainService`), renderer, and an in-memory store
 - `crates/wee-events-macros`: derive macros for `Command` and `DomainEvent`
+- `crates/wee-events-restate`: Restate SDK-based command executor with side-effect dispatch and HTTP client
 - `crates/wee-events-sqlite`: a libSQL-backed SQLite event store plus document and projection helpers
 
 ```text
 crates/
   wee-events/
   wee-events-macros/
+  wee-events-restate/
   wee-events-sqlite/
 ```
 
