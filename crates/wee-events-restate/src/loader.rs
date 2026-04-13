@@ -6,13 +6,13 @@ use crate::service::ErasedService;
 use crate::types::ExecuteResponse;
 use wee_events::AggregateId;
 
-pub struct Loader {
-    service: Arc<dyn ErasedService>,
+pub struct Loader<T> {
+    service: Arc<T>,
     service_name: String,
 }
 
-impl Loader {
-    pub fn new(service_name: impl Into<String>, service: Arc<dyn ErasedService>) -> Self {
+impl<T: ErasedService> Loader<T> {
+    pub fn new(service_name: impl Into<String>, service: Arc<T>) -> Self {
         Self {
             service,
             service_name: service_name.into(),

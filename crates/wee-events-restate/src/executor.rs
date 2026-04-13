@@ -5,13 +5,13 @@ use restate_sdk::prelude::*;
 use crate::service::ErasedService;
 use crate::types::{ExecuteRequest, ExecuteResponse};
 
-pub struct Executor {
-    service: Arc<dyn ErasedService>,
+pub struct Executor<T> {
+    service: Arc<T>,
     service_name: String,
 }
 
-impl Executor {
-    pub fn new(service_name: impl Into<String>, service: Arc<dyn ErasedService>) -> Self {
+impl<T: ErasedService> Executor<T> {
+    pub fn new(service_name: impl Into<String>, service: Arc<T>) -> Self {
         Self {
             service,
             service_name: service_name.into(),
