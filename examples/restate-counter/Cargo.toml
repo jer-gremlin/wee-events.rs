@@ -1,0 +1,14 @@
+[package]
+name = "restate-counter"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+rand = "0.9"
+restate-sdk = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+wee-events = { path = "../../crates/wee-events" }
+wee-events-restate = { path = "../../crates/wee-events-restate" }
