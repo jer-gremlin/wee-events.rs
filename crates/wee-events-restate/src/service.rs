@@ -4,7 +4,7 @@ use wee_events::{AggregateId, CommandName, Revision};
 
 #[derive(Debug, Clone)]
 pub struct ServiceResponse {
-    pub aggregate_id: AggregateId,
+    pub aggregate: AggregateId,
     pub revision: Revision,
     pub state: serde_json::Value,
 }
@@ -48,7 +48,7 @@ where
     async fn load(&self, id: &AggregateId) -> Result<ServiceResponse, wee_events::Error> {
         let entity = self.inner.load(id).await?;
         Ok(ServiceResponse {
-            aggregate_id: entity.aggregate_id,
+            aggregate: entity.aggregate_id,
             revision: entity.revision,
             state: serde_json::to_value(&entity.state)?,
         })
@@ -62,7 +62,7 @@ where
     ) -> Result<ServiceResponse, wee_events::Error> {
         let entity = self.inner.execute(name, target, command).await?;
         Ok(ServiceResponse {
-            aggregate_id: entity.aggregate_id,
+            aggregate: entity.aggregate_id,
             revision: entity.revision,
             state: serde_json::to_value(&entity.state)?,
         })

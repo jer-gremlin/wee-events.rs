@@ -2,15 +2,16 @@ use std::sync::Arc;
 
 use restate_sdk::prelude::*;
 
+use crate::names;
 use crate::service::JsonService;
-use crate::types::{ExecuteRequest, ExecuteResponse};
+use crate::types::{ExecuteRequest, EntityResponse};
 
-pub struct Executor<T> {
+pub struct CommandHandler<T> {
     service: Arc<T>,
     service_name: String,
 }
 
-impl<T: JsonService> Executor<T> {
+impl<T: JsonService> CommandHandler<T> {
     pub fn new(service_name: impl Into<String>, service: Arc<T>) -> Self {
         Self {
             service,
@@ -21,7 +22,7 @@ impl<T: JsonService> Executor<T> {
     pub async fn do_execute(
         &self,
         request: &ExecuteRequest,
-    ) -> Result<ExecuteResponse, HandlerError> {
+    ) -> Result<EntityResponse, HandlerError> {
         let result = self
             .service
             .execute(
@@ -32,8 +33,8 @@ impl<T: JsonService> Executor<T> {
             .await;
 
         match result {
-            Ok(resp) => Ok(ExecuteResponse {
-                aggregate: resp.aggregate_id,
+            Ok(resp) => Ok(EntityResponse {
+                aggregate: resp.aggregate,
                 revision: resp.revision,
                 state: resp.state,
             }),
@@ -50,10 +51,10 @@ impl<T: JsonService> Executor<T> {
     }
 
     pub fn executor_name(&self) -> String {
-        format!("{}-side-effect-executor", self.service_name)
+        names::executor_name(&self.service_name)
     }
 
     pub fn runner_name(&self) -> String {
-        format!("{}-side-effect-runner", self.service_name)
+        names::runner_name(&self.service_name)
     }
 }

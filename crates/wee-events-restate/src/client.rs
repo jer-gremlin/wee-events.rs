@@ -2,7 +2,8 @@ use std::marker::PhantomData;
 
 use wee_events::{AggregateId, CommandName, Entity, Rejection};
 
-use crate::types::{CommandRequest, ExecuteRequest, ExecuteResponse, Metadata};
+use crate::names;
+use crate::types::{CommandRequest, ExecuteRequest, EntityResponse, Metadata};
 
 /// Restate-backed service client implementing `EntityLoader<S>` + `CommandExecutor<S>`
 /// by calling the executor workflow and loader service over the Restate ingress HTTP API.
@@ -24,11 +25,11 @@ impl<S> RestateClient<S> {
     }
 
     fn executor_name(&self) -> String {
-        format!("{}-side-effect-executor", self.service_name)
+        names::executor_name(&self.service_name)
     }
 
     fn loader_name(&self) -> String {
-        format!("{}-side-effect-loader", self.service_name)
+        names::loader_name(&self.service_name)
     }
 
     fn encode_key(target: &AggregateId) -> String {
@@ -61,7 +62,7 @@ where
             return Err(wee_events::Error::Store(text.into()));
         }
 
-        let exec_resp: ExecuteResponse = resp
+        let exec_resp: EntityResponse = resp
             .json()
             .await
             .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
@@ -131,7 +132,7 @@ where
             return Err(wee_events::Error::Store(text.into()));
         }
 
-        let exec_resp: ExecuteResponse = resp
+        let exec_resp: EntityResponse = resp
             .json()
             .await
             .map_err(|e| wee_events::Error::Store(Box::new(e)))?;

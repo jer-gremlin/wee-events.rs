@@ -22,7 +22,7 @@ pub struct ExecuteRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecuteResponse {
+pub struct EntityResponse {
     pub aggregate: AggregateId,
     pub revision: Revision,
     pub state: serde_json::Value,
@@ -31,6 +31,6 @@ pub struct ExecuteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteNotification {
     pub command: CommandRequest,
-    pub response: ExecuteResponse,
+    pub response: EntityResponse,
     pub metadata: Metadata,
 }
