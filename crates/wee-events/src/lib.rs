@@ -1,5 +1,6 @@
 mod aggregate;
 mod command;
+mod dispatcher;
 mod entity;
 mod error;
 mod event;
@@ -16,6 +17,7 @@ mod test_suite;
 
 pub use aggregate::Aggregate;
 pub use command::Command;
+pub use dispatcher::Dispatcher;
 pub use entity::Entity;
 pub use error::Error;
 pub use event::{ChangeSet, DomainEvent, EventData, EventMetadata, RecordedEvent};
