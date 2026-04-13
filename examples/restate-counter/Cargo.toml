@@ -4,6 +4,14 @@ version = "0.0.0"
 edition.workspace = true
 publish = false
 
+[lib]
+name = "restate_counter"
+path = "src/lib.rs"
+
+[[bin]]
+name = "restate-counter"
+path = "src/main.rs"
+
 [dependencies]
 rand = "0.9"
 restate-sdk = "0.8"
@@ -12,3 +20,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 wee-events = { path = "../../crates/wee-events" }
 wee-events-restate = { path = "../../crates/wee-events-restate" }
+
+[dev-dependencies]
+proptest = "1"
+tokio = { workspace = true }

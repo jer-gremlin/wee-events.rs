@@ -22,22 +22,17 @@
 //!   -d '{"command":{"name":"adjust","target":{"aggregate_type":"counter","aggregate_key":"c1"},"command":null},"metadata":{"correlation_id":"req-2"}}'
 //! ```
 
-mod domain;
-mod effects;
-mod handlers;
-mod random;
-
 use std::sync::Arc;
 
 use restate_sdk::prelude::*;
 use wee_events::memory::MemoryStore;
 
-use crate::domain::{build_dispatcher, build_renderer};
-use crate::effects::{AuditLogger, LoggingEffect};
-use crate::handlers::{
+use restate_counter::domain::{build_dispatcher, build_renderer};
+use restate_counter::effects::{AuditLogger, LoggingEffect};
+use restate_counter::handlers::{
     CounterCommands, CounterComponents, CounterExecutor, CounterLoader, CounterQueries,
 };
-use crate::random::{RandomGenerator, RandomService};
+use restate_counter::random::{RandomGenerator, RandomService};
 
 #[tokio::main]
 async fn main() {
