@@ -6,6 +6,7 @@ mod event;
 mod id;
 mod memory_store;
 mod renderer;
+mod service;
 mod store;
 
 #[cfg(any(test, feature = "testing"))]
@@ -17,6 +18,7 @@ pub use aggregate::Aggregate;
 pub use command::Command;
 pub use entity::Entity;
 pub use error::Error;
+pub use service::Rejection;
 pub use event::{ChangeSet, DomainEvent, EventData, EventMetadata, RecordedEvent};
 pub use id::{
     AggregateId, AggregateIdParseError, AggregateType, CommandName, CorrelationId, EventId,

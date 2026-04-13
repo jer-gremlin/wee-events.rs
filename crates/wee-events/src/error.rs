@@ -21,4 +21,7 @@ pub enum Error {
     /// Wraps the original error to preserve the error chain for debugging.
     #[error(transparent)]
     Store(Box<dyn std::error::Error + Send + Sync>),
+
+    #[error(transparent)]
+    Rejection(#[from] crate::service::Rejection),
 }
