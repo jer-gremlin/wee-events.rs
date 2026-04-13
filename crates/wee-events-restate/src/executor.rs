@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use restate_sdk::prelude::*;
 
-use crate::service::ErasedService;
+use crate::service::JsonService;
 use crate::types::{ExecuteRequest, ExecuteResponse};
 
 pub struct Executor<T> {
@@ -10,7 +10,7 @@ pub struct Executor<T> {
     service_name: String,
 }
 
-impl<T: ErasedService> Executor<T> {
+impl<T: JsonService> Executor<T> {
     pub fn new(service_name: impl Into<String>, service: Arc<T>) -> Self {
         Self {
             service,
