@@ -89,6 +89,7 @@ mod tests {
             metadata: Metadata {
                 correlation_id: "test-corr".to_string(),
                 causation_id: None,
+                idempotency_key: None,
             },
         }
     }

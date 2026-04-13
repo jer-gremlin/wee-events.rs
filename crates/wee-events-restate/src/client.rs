@@ -40,6 +40,81 @@ impl<S> RestateClient<S> {
         let key = Self::encode_key(target);
         format!("{}-{}-{}", key, command_name, nanoid::nanoid!())
     }
+
+    /// Execute a command with an explicit idempotency key. Resubmitting
+    /// the same key returns the original result without re-executing.
+    ///
+    /// The key is used as the Restate workflow ID, so it must be unique
+    /// across all commands for this service.
+    pub async fn execute_idempotent(
+        &self,
+        name: &CommandName,
+        target: &AggregateId,
+        command: serde_json::Value,
+        idempotency_key: impl Into<String>,
+    ) -> wee_events::Result<Entity<S>>
+    where
+        S: serde::de::DeserializeOwned,
+    {
+        let idempotency_key = idempotency_key.into();
+        let correlation_id = Self::generate_correlation_id(target, name);
+
+        let request = ExecuteRequest {
+            command: CommandRequest {
+                name: name.clone(),
+                target: target.clone(),
+                command,
+            },
+            metadata: Metadata {
+                correlation_id,
+                causation_id: None,
+                idempotency_key: Some(idempotency_key.clone()),
+            },
+        };
+
+        // Use the idempotency key as the workflow ID
+        let url = format!(
+            "{}/{}/{}/run",
+            self.ingress_url,
+            self.executor_name(),
+            idempotency_key,
+        );
+
+        let resp = self
+            .http
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            if let Ok(rejection) = serde_json::from_str::<Rejection>(&text) {
+                return Err(wee_events::Error::Rejection(rejection));
+            }
+            if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Some(message) = envelope.get("message").and_then(|m| m.as_str()) {
+                    if let Ok(rejection) = serde_json::from_str::<Rejection>(message) {
+                        return Err(wee_events::Error::Rejection(rejection));
+                    }
+                }
+            }
+            return Err(wee_events::Error::Store(text.into()));
+        }
+
+        let exec_resp: EntityResponse = resp
+            .json()
+            .await
+            .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
+
+        let state: S = serde_json::from_value(exec_resp.state)?;
+        Ok(Entity {
+            aggregate_id: exec_resp.aggregate,
+            revision: exec_resp.revision,
+            state,
+        })
+    }
 }
 
 impl<S> wee_events::EntityLoader<S> for RestateClient<S>
@@ -97,6 +172,7 @@ where
             metadata: Metadata {
                 correlation_id: correlation_id.clone(),
                 causation_id: None,
+                idempotency_key: None,
             },
         };
 
