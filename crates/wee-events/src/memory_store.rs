@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use ulid::Generator;
 
@@ -14,20 +14,33 @@ use crate::Error;
 /// Uses a monotonic ULID generator — guarantees strictly increasing
 /// revisions even within the same millisecond.
 pub struct MemoryStore {
+    backing: Arc<MemoryStoreBacking>,
+}
+
+/// Shared backing state for one or more [`MemoryStore`] handles.
+///
+/// Multiple stores created with the same backing observe the same aggregate
+/// streams and revision generator, which is useful for contract tests that
+/// exercise multiple store instances over one logical persistence layer.
+pub struct MemoryStoreBacking {
     streams: Mutex<HashMap<AggregateId, Vec<RecordedEvent>>>,
     generator: Mutex<Generator>,
 }
 
 impl MemoryStore {
     pub fn new() -> Self {
+        Self::from_shared(Arc::new(MemoryStoreBacking::new()))
+    }
+
+    pub fn from_shared(backing: Arc<MemoryStoreBacking>) -> Self {
         Self {
-            streams: Mutex::new(HashMap::new()),
-            generator: Mutex::new(Generator::new()),
+            backing,
         }
     }
 
     fn generate_ulid(&self) -> Result<String, Error> {
-        self.generator
+        self.backing
+            .generator
             .lock()
             .expect("ULID generator mutex poisoned")
             .generate()
@@ -42,16 +55,39 @@ impl Default for MemoryStore {
     }
 }
 
+impl MemoryStoreBacking {
+    pub fn new() -> Self {
+        Self {
+            streams: Mutex::new(HashMap::new()),
+            generator: Mutex::new(Generator::new()),
+        }
+    }
+}
+
+impl Default for MemoryStoreBacking {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryStore {
     /// Returns all distinct aggregate IDs in the store.
     pub fn enumerate_aggregates(&self) -> Vec<AggregateId> {
-        let streams = self.streams.lock().expect("streams mutex poisoned");
+        let streams = self
+            .backing
+            .streams
+            .lock()
+            .expect("streams mutex poisoned");
         streams.keys().cloned().collect()
     }
 
     /// Returns all distinct aggregate IDs of a given type.
     pub fn enumerate_aggregates_by_type(&self, aggregate_type: &AggregateType) -> Vec<AggregateId> {
-        let streams = self.streams.lock().expect("streams mutex poisoned");
+        let streams = self
+            .backing
+            .streams
+            .lock()
+            .expect("streams mutex poisoned");
         streams
             .keys()
             .filter(|id| *id.aggregate_type() == *aggregate_type)
@@ -62,7 +98,11 @@ impl MemoryStore {
 
 impl EventStore for MemoryStore {
     async fn load(&self, id: &AggregateId) -> Result<Aggregate, Error> {
-        let streams = self.streams.lock().expect("streams mutex poisoned");
+        let streams = self
+            .backing
+            .streams
+            .lock()
+            .expect("streams mutex poisoned");
 
         match streams.get(id) {
             Some(events) if !events.is_empty() => {
@@ -78,7 +118,11 @@ impl EventStore for MemoryStore {
         options: PublishOptions,
         events: Vec<RawEvent>,
     ) -> Result<ChangeSet, Error> {
-        let mut streams = self.streams.lock().expect("streams mutex poisoned");
+        let mut streams = self
+            .backing
+            .streams
+            .lock()
+            .expect("streams mutex poisoned");
 
         if events.is_empty() {
             let revision = streams

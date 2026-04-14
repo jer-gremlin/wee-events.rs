@@ -21,7 +21,7 @@ pub use command::Command;
 pub use dispatcher::Dispatcher;
 pub use domain_service::DomainService;
 pub use entity::Entity;
-pub use error::Error;
+pub use error::{Error, RetryDiagnostics};
 pub use event::{ChangeSet, DomainEvent, EventData, EventMetadata, RecordedEvent};
 pub use id::{
     AggregateId, AggregateIdParseError, AggregateType, CommandName, CorrelationId, EventId,
@@ -33,12 +33,13 @@ pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{Command, DomainEvent};
 
 pub mod memory {
-    pub use crate::memory_store::MemoryStore;
+    pub use crate::memory_store::{MemoryStore, MemoryStoreBacking};
 }
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
     pub use crate::bench_suite::*;
+    pub use crate::shared_store_test_suite;
     pub use crate::store_bench_suite;
     pub use crate::store_test_suite;
     pub use crate::test_suite::*;
