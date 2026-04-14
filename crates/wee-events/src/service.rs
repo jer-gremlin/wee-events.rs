@@ -81,38 +81,33 @@ impl<S, T: EntityLoader<S> + CommandExecutor<S>> Service<S> for T {}
 
 /// Marker trait that declares a service can handle command type `C`.
 ///
-/// The `Idx` type parameter encodes the handler's position in a type-level
-/// handler list (using `Here` / `There<Idx>` selector types from
-/// `service_builder`). This avoids overlapping-impl errors when multiple
-/// commands are registered. The default `Idx = ()` keeps the trait ergonomic
-/// for hand-written single-command impls.
-///
 /// Implement this for each command type your service supports. The
-/// `TypedService::execute` method requires `Self: Handles<C, Idx>` so the
+/// `TypedService::execute` method requires `Self: Handles<C>` so the
 /// compiler rejects calls with unregistered command types at compile time.
-pub trait Handles<C, Idx = ()> {}
+pub trait Handles<C> {}
 
 /// A typed service contract combining state loading with type-safe command dispatch.
 ///
 /// Unlike `Service<S>` (which takes untyped JSON), `TypedService<S>` dispatches
-/// over concrete command types. The `Handles<C, Idx>` bound on `execute` ensures
+/// over concrete command types. The `Handles<C>` bound on `execute` ensures
 /// only registered commands can be dispatched — unregistered commands produce a
 /// compile error rather than a runtime rejection.
 ///
-/// The `Idx` type parameter is inferred by the compiler; callers do not need
-/// to specify it.
+/// The trait is transport-agnostic: no `Serialize`, `Deserialize`, or
+/// transport-specific bounds appear here. Serialization is an adapter concern
+/// handled by generated macro code.
 pub trait TypedService<S>: Send + Sync {
     fn load(
         &self,
         id: &AggregateId,
     ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send;
 
-    fn execute<C, Idx>(
+    fn execute<C>(
         &self,
         id: &AggregateId,
         cmd: C,
     ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send
     where
-        C: crate::Command + serde::Serialize + Send + 'static,
-        Self: Handles<C, Idx>;
+        C: crate::Command + Send + 'static,
+        Self: Handles<C>;
 }

@@ -57,8 +57,8 @@ wee_events_restate::restate_service! {
 fn assert_typed_service<T>(_: &T)
 where
     T: wee_events::TypedService<Counter>
-        + wee_events::Handles<Increment, ()>
-        + wee_events::Handles<Adjust, ()>,
+        + wee_events::Handles<Increment>
+        + wee_events::Handles<Adjust>,
 {
 }
 

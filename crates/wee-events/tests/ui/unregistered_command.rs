@@ -1,8 +1,7 @@
 use std::future::Future;
-use wee_events::{AggregateId, Command, CommandName, Entity, Handles, Revision, TypedService};
-use serde::Serialize;
+use wee_events::{AggregateId, Command, Entity, Handles, Revision, TypedService};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct Increment {
     amount: i64,
 }
@@ -11,7 +10,7 @@ impl Command for Increment {
     const NAME: &'static str = "counter:increment";
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct Unsupported;
 
 impl Command for Unsupported {
@@ -42,14 +41,14 @@ impl TypedService<Counter> for TestService {
         }
     }
 
-    fn execute<C, Idx>(
+    fn execute<C>(
         &self,
         id: &AggregateId,
         _cmd: C,
     ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
     where
-        C: Command + Serialize + Send + 'static,
-        Self: Handles<C, Idx>,
+        C: Command + Send + 'static,
+        Self: Handles<C>,
     {
         let id = id.clone();
         async move {

@@ -43,7 +43,6 @@ use std::pin::Pin;
 
 use crate::entity::Entity;
 use crate::id::AggregateId;
-use crate::service::Handles;
 use crate::Command;
 
 // ---------------------------------------------------------------------------
@@ -333,42 +332,14 @@ where
     }
 }
 
-// ---------------------------------------------------------------------------
-// Handles<C> for BuiltService
+// Note: `BuiltService` does NOT implement the public `Handles<C>` trait
+// directly. A blanket impl would require an unconstrained `Idx` type parameter
+// (E0207). Instead, macro-generated wrapper types implement `Handles<C>` for
+// each concrete registered command.
 //
-// We implement the `Handles<C>` marker from `service.rs` for `BuiltService`
-// when the handler list contains `C`. The `Idx` selector is needed to avoid
-// overlapping impls but is a phantom type — it does not appear on `BuiltService`
-// itself and is not visible to callers.
-//
-// Rust's E0207 rule ("unconstrained type parameter") prevents `Idx` from
-// appearing only in a where-clause bound. The workaround: add `Idx` to a
-// private sealed marker trait `ContainsHandler<C, Idx>` and implement
-// `Handles<C>` from it. The `Idx` in `ContainsHandler`'s impls IS constrained
-// by the impl's self-type chain.
-// ---------------------------------------------------------------------------
-
-/// Sealed marker: the handler list `Self` contains a handler for `C` at
-/// position `Idx` in the list.
-trait ContainsHandler<C, Idx> {}
-
-impl<C, H, Tail> ContainsHandler<C, Here> for HandlerList<C, H, Tail> {}
-
-impl<C, Other, H, Tail, Idx> ContainsHandler<C, There<Idx>> for HandlerList<Other, H, Tail> where
-    Tail: ContainsHandler<C, Idx>
-{
-}
-
-// Blanket impl: `BuiltService` handles `C` at position `Idx` when `Handlers`
-// contains `C` at that position.
-//
-// `Idx` appears in the trait `Handles<C, Idx>` being implemented, which
-// satisfies Rust's E0207 constraint (every type parameter must appear in
-// the trait, self-type, or their associated types).
-impl<C, Idx, Ctx, S, L, F, Handlers> Handles<C, Idx> for BuiltService<Ctx, S, L, F, Handlers> where
-    Handlers: ContainsHandler<C, Idx>
-{
-}
+// `BuiltService::execute` uses `HandleCommand<C, Idx, Ctx, S>` internally
+// as an inherent method bound — the `Idx` is inferred by the compiler and
+// never appears in the public API.
 
 // ---------------------------------------------------------------------------
 // Factory type alias — erases the concrete factory future type.
@@ -442,24 +413,19 @@ where
 
     /// Execute a typed command against the aggregate.
     ///
-    /// Requires `Self: Handles<C>` — satisfied at compile time when `C` was
-    /// registered with `ServiceBuilder::with_handler`.
+    /// The `Idx` type parameter is an internal HList selector inferred by
+    /// the compiler — callers never specify it. `HandleCommand` is the
+    /// internal dispatch trait that routes to the correct handler.
     ///
-    /// Calls the factory (fresh context), loader (current entity), then the
-    /// registered handler for `C`.
-    // `Handles<C, Idx>` provides the user-facing compile error for unregistered
-    // commands; `HandleCommand` provides the actual dispatch mechanism. Both are
-    // needed because the trait-level `Handles` bound cannot imply the internal
-    // `HandleCommand` bound without a blanket impl that Rust's coherence rules
-    // reject.
+    /// Macro-generated wrappers call this method and implement the public
+    /// `Handles<C>` + `TypedService<S>` traits for each concrete command.
     pub fn execute<C, Idx>(
         &self,
         id: &AggregateId,
         cmd: C,
     ) -> impl Future<Output = crate::Result<Entity<S>>> + Send + '_
     where
-        C: Command + serde::Serialize + Send + 'static,
-        Self: Handles<C, Idx>,
+        C: Command + Send + 'static,
         Handlers: HandleCommand<C, Idx, Ctx, S>,
     {
         let id = id.clone();
