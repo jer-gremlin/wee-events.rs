@@ -5,7 +5,7 @@ use libsql::{Builder, Connection};
 
 use crate::{event_store::DatabaseTarget, Error};
 
-const EVENT_STORE_SCHEMA_VERSION: u32 = 1;
+const EVENT_STORE_SCHEMA_VERSION: u32 = 2;
 const DOCUMENT_STORE_SCHEMA_VERSION: u32 = 1;
 
 const EVENTS_DDL: &str = "
@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS documents (
     revision    TEXT NOT NULL,
     data        TEXT NOT NULL CHECK(json_valid(data)),
     PRIMARY KEY (collection, key)
+);
+";
+
+const PARTITION_METADATA_DDL: &str = "
+CREATE TABLE IF NOT EXISTS _wee_events_partition_metadata (
+    key     TEXT PRIMARY KEY,
+    value   TEXT NOT NULL
 );
 ";
 
@@ -125,7 +132,7 @@ async fn migrate_event_store(conn: &Connection) -> Result<(), Error> {
         conn,
         "_wee_events_event_store_user_version",
         EVENT_STORE_SCHEMA_VERSION,
-        &[(1, EVENTS_DDL)],
+        &[(1, EVENTS_DDL), (2, PARTITION_METADATA_DDL)],
     )
     .await
 }
@@ -204,6 +211,46 @@ async fn query_required_string(conn: &Connection, sql: &str) -> Result<String, E
         return Err(Error::Configuration(format!(
             "expected row when querying pragma: {sql}"
         )));
+    };
+
+    row.get(0).map_err(Into::into)
+}
+
+pub(crate) async fn ensure_partition_name(
+    conn: &Connection,
+    logical_name: &str,
+) -> Result<(), Error> {
+    conn.execute(
+        "INSERT OR IGNORE INTO _wee_events_partition_metadata (key, value)
+         VALUES ('logical_name', ?1)",
+        [logical_name],
+    )
+    .await?;
+
+    let Some(recorded_name) = load_partition_name(conn).await? else {
+        return Err(Error::Internal(
+            "partition metadata insert succeeded without recording logical_name".to_string(),
+        ));
+    };
+    if recorded_name != logical_name {
+        return Err(Error::Configuration(format!(
+            "logical partition name mismatch: target is recorded as '{recorded_name}' but was opened for '{logical_name}'"
+        )));
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn load_partition_name(conn: &Connection) -> Result<Option<String>, Error> {
+    let mut rows = conn
+        .query(
+            "SELECT value FROM _wee_events_partition_metadata WHERE key = 'logical_name'",
+            (),
+        )
+        .await?;
+
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
     };
 
     row.get(0).map_err(Into::into)

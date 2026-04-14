@@ -3,13 +3,17 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use futures_util::future::try_join_all;
 use libsql::{Connection, TransactionBehavior};
 use tokio::sync::Mutex as AsyncMutex;
-use ulid::Generator;
+use tokio::time::sleep;
+use ulid::{Generator, Ulid};
 use wee_events::{
     Aggregate, AggregateId, AggregateType, ChangeSet, CorrelationId, EventData, EventId,
     EventMetadata, EventStore as EventStoreApi, PublishOptions, RawEvent, RecordedEvent, Revision,
+    RetryDiagnostics,
 };
 
 use crate::{database, Error};
@@ -27,6 +31,9 @@ use super::types::{
 };
 
 type SharedConnection = Arc<AsyncMutex<Connection>>;
+const MAX_AUTO_RETRIES: usize = 5;
+const BASE_RETRY_DELAY_MS: u64 = 2;
+const MAX_RETRY_DELAY_MS: u64 = 64;
 
 /// SQLite-compatible event store backed by libSQL.
 ///
@@ -103,29 +110,19 @@ where
 
     /// Returns all distinct aggregate IDs in the store.
     pub async fn enumerate_aggregates(&self) -> Result<Vec<AggregateId>, Error> {
-        let mut ids = Vec::new();
-        for partition in self.all_known_partitions().await? {
-            match self.strategy.read_plan(&partition) {
-                PartitionRead::ScanAll => {
-                    let Some(conn) = self.open_partition_if_exists(&partition).await? else {
-                        continue;
-                    };
-                    let conn = conn.lock().await;
-                    ids.extend(Self::enumerate_all_from_connection(&conn).await?);
-                }
-                PartitionRead::ScanType(aggregate_type) => {
-                    let Some(conn) = self.open_partition_if_exists(&partition).await? else {
-                        continue;
-                    };
-                    let conn = conn.lock().await;
-                    ids.extend(
-                        Self::enumerate_by_type_from_connection(&conn, &aggregate_type).await?,
-                    );
-                }
-                PartitionRead::Direct(aggregate_id) => ids.push(aggregate_id),
-                PartitionRead::Skip => {}
-            }
-        }
+        let ids = try_join_all(
+            self.all_known_partitions()
+                .await?
+                .into_iter()
+                .map(|partition| {
+                    let plan = self.strategy.read_plan(&partition);
+                    self.enumerate_partition(partition, plan)
+                }),
+        )
+        .await?
+        .into_iter()
+        .flatten()
+        .collect();
 
         Ok(Self::sorted_unique_ids(ids))
     }
@@ -135,31 +132,46 @@ where
         &self,
         aggregate_type: &AggregateType,
     ) -> Result<Vec<AggregateId>, Error> {
-        let mut ids = Vec::new();
-        for partition in self.all_known_partitions().await? {
-            match self.strategy.read_plan_by_type(&partition, aggregate_type) {
-                PartitionRead::ScanAll => {
-                    let Some(conn) = self.open_partition_if_exists(&partition).await? else {
-                        continue;
-                    };
-                    let conn = conn.lock().await;
-                    ids.extend(Self::enumerate_all_from_connection(&conn).await?);
-                }
-                PartitionRead::ScanType(aggregate_type) => {
-                    let Some(conn) = self.open_partition_if_exists(&partition).await? else {
-                        continue;
-                    };
-                    let conn = conn.lock().await;
-                    ids.extend(
-                        Self::enumerate_by_type_from_connection(&conn, &aggregate_type).await?,
-                    );
-                }
-                PartitionRead::Direct(aggregate_id) => ids.push(aggregate_id),
-                PartitionRead::Skip => {}
-            }
-        }
+        let ids = try_join_all(
+            self.all_known_partitions()
+                .await?
+                .into_iter()
+                .map(|partition| {
+                    let plan = self.strategy.read_plan_by_type(&partition, aggregate_type);
+                    self.enumerate_partition(partition, plan)
+                }),
+        )
+        .await?
+        .into_iter()
+        .flatten()
+        .collect();
 
         Ok(Self::sorted_unique_ids(ids))
+    }
+
+    async fn enumerate_partition(
+        &self,
+        partition: S::Partition,
+        plan: PartitionRead,
+    ) -> Result<Vec<AggregateId>, Error> {
+        match plan {
+            PartitionRead::ScanAll => {
+                let Some(conn) = self.open_partition_if_exists(&partition).await? else {
+                    return Ok(Vec::new());
+                };
+                let conn = conn.lock().await;
+                Self::enumerate_all_from_connection(&conn).await
+            }
+            PartitionRead::ScanType(aggregate_type) => {
+                let Some(conn) = self.open_partition_if_exists(&partition).await? else {
+                    return Ok(Vec::new());
+                };
+                let conn = conn.lock().await;
+                Self::enumerate_by_type_from_connection(&conn, &aggregate_type).await
+            }
+            PartitionRead::Direct(aggregate_id) => Ok(vec![aggregate_id]),
+            PartitionRead::Skip => Ok(Vec::new()),
+        }
     }
 
     async fn ensure_partition_open(
@@ -172,7 +184,11 @@ where
         }
 
         let target = self.catalog.ensure_target_for_partition(partition).await?;
-        let new_conn = Arc::new(AsyncMutex::new(self.open_target(&target).await?));
+        let conn = self.open_target(&target).await?;
+        self.catalog
+            .prepare_connection_for_partition(partition, &conn)
+            .await?;
+        let new_conn = Arc::new(AsyncMutex::new(conn));
 
         let mut connections = self.connections.lock().await;
         Ok(connections
@@ -198,7 +214,11 @@ where
             return Ok(None);
         };
 
-        let new_conn = Arc::new(AsyncMutex::new(self.open_target(&target).await?));
+        let conn = self.open_target(&target).await?;
+        self.catalog
+            .prepare_connection_for_partition(partition, &conn)
+            .await?;
+        let new_conn = Arc::new(AsyncMutex::new(conn));
         let mut connections = self.connections.lock().await;
         Ok(Some(
             connections
@@ -356,8 +376,6 @@ where
         row.get(0).map_err(Into::into)
     }
 
-    const MAX_AUTO_RETRIES: usize = 5;
-
     async fn publish_with_connection(
         &self,
         conn: &Connection,
@@ -376,30 +394,47 @@ where
 
         let can_auto_retry = options.expected_revision.is_none();
         let max_attempts = if can_auto_retry {
-            Self::MAX_AUTO_RETRIES
+            MAX_AUTO_RETRIES
         } else {
             1
         };
 
-        let mut last_error = None;
-        for _attempt in 0..max_attempts {
+        let mut last_conflict = None;
+        for attempt in 0..max_attempts {
             match self
                 .try_publish_once(conn, aggregate_id, &options, &events)
                 .await
             {
                 Ok(changeset) => return Ok(changeset),
-                Err(Error::WeeEvents(wee_events::Error::RevisionConflict { .. }))
+                Err(PublishAttemptError::Conflict(conflict))
                     if can_auto_retry =>
                 {
-                    last_error = Some(Error::WeeEvents(wee_events::Error::RetryExhausted {
-                        attempts: max_attempts,
+                    last_conflict = Some(RetryDiagnostics {
+                        last_attempted_revision: conflict.attempted_revision.clone(),
+                        observed_max_revision: conflict.actual.clone(),
+                        possible_clock_skew_ms: possible_clock_skew_ms(
+                            &conflict.attempted_revision,
+                            &conflict.actual,
+                        ),
+                    });
+                    if attempt + 1 < max_attempts {
+                        sleep(retry_delay(attempt)).await;
+                    }
+                }
+                Err(PublishAttemptError::Conflict(conflict)) => {
+                    return Err(Error::WeeEvents(wee_events::Error::RevisionConflict {
+                        expected: conflict.expected,
+                        actual: conflict.actual,
                     }));
                 }
-                Err(error) => return Err(error),
+                Err(PublishAttemptError::Store(error)) => return Err(error),
             }
         }
 
-        Err(last_error.expect("retry loop always records the last conflict"))
+        Err(Error::WeeEvents(wee_events::Error::RetryExhausted {
+            attempts: max_attempts,
+            diagnostics: last_conflict.expect("retry loop always records the last conflict"),
+        }))
     }
 
     async fn publish_to_aggregate(
@@ -422,10 +457,11 @@ where
         aggregate_id: &AggregateId,
         options: &PublishOptions,
         events: &[RawEvent],
-    ) -> Result<ChangeSet, Error> {
+    ) -> Result<ChangeSet, PublishAttemptError> {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .await?;
+            .await
+            .map_err(Error::from)?;
         let metadata = EventMetadata {
             causation_id: options.causation_id.clone(),
             correlation_id: options.correlation_id.clone(),
@@ -450,6 +486,7 @@ where
             .await?;
 
             if changes == 0 {
+                let attempted_revision = Revision::new(revision.clone());
                 let actual = match Self::current_revision(&tx, aggregate_id).await? {
                     Some(value) => Revision::new(value),
                     None => Revision::zero(),
@@ -457,11 +494,12 @@ where
                 let expected = options
                     .expected_revision
                     .clone()
-                    .unwrap_or_else(|| actual.clone());
+                    .unwrap_or_else(|| attempted_revision.clone());
 
-                return Err(Error::WeeEvents(wee_events::Error::RevisionConflict {
+                return Err(PublishAttemptError::Conflict(PublishConflict {
                     expected,
                     actual,
+                    attempted_revision,
                 }));
             }
 
@@ -474,7 +512,7 @@ where
             });
         }
 
-        tx.commit().await?;
+        tx.commit().await.map_err(Error::from)?;
 
         Ok(ChangeSet {
             aggregate_id: aggregate_id.clone(),
@@ -486,6 +524,50 @@ where
             events: recorded,
         })
     }
+}
+
+#[derive(Debug, Clone)]
+struct PublishConflict {
+    expected: Revision,
+    actual: Revision,
+    attempted_revision: Revision,
+}
+
+#[derive(Debug)]
+enum PublishAttemptError {
+    Conflict(PublishConflict),
+    Store(Error),
+}
+
+impl From<Error> for PublishAttemptError {
+    fn from(error: Error) -> Self {
+        Self::Store(error)
+    }
+}
+
+fn retry_delay(attempt: usize) -> Duration {
+    let exponent = attempt.min(5) as u32;
+    let backoff_ms = (BASE_RETRY_DELAY_MS << exponent).min(MAX_RETRY_DELAY_MS);
+    let jitter_ms = if backoff_ms == 0 {
+        0
+    } else {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64
+            % (backoff_ms + 1)
+    };
+
+    Duration::from_millis(backoff_ms + jitter_ms)
+}
+
+fn possible_clock_skew_ms(attempted: &Revision, actual: &Revision) -> Option<u64> {
+    let attempted_ulid = Ulid::from_string(attempted.as_str()).ok()?;
+    let actual_ulid = Ulid::from_string(actual.as_str()).ok()?;
+    actual_ulid
+        .timestamp_ms()
+        .checked_sub(attempted_ulid.timestamp_ms())
+        .filter(|delta| *delta > 0)
 }
 
 pub struct MissingBackend;
@@ -884,5 +966,30 @@ async fn execute_publish_statement(
             .await
             .map_err(Into::into)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::possible_clock_skew_ms;
+    use ulid::Ulid;
+    use wee_events::Revision;
+
+    #[test]
+    fn possible_clock_skew_reports_positive_timestamp_gap() {
+        let attempted = Revision::new(Ulid::from_parts(1_000, 7).to_string());
+        let actual = Revision::new(Ulid::from_parts(1_017, 3).to_string());
+
+        assert_eq!(possible_clock_skew_ms(&attempted, &actual), Some(17));
+    }
+
+    #[test]
+    fn possible_clock_skew_ignores_non_positive_gaps() {
+        let attempted = Revision::new(Ulid::from_parts(1_000, 7).to_string());
+        let same_ms = Revision::new(Ulid::from_parts(1_000, 99).to_string());
+        let earlier = Revision::new(Ulid::from_parts(999, 3).to_string());
+
+        assert_eq!(possible_clock_skew_ms(&attempted, &same_ms), None);
+        assert_eq!(possible_clock_skew_ms(&attempted, &earlier), None);
     }
 }

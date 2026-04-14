@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use data_encoding::BASE32_NOPAD;
+use libsql::Connection;
 
-use crate::Error;
+use crate::{database, Error};
 
 use super::super::partitioning::PartitionCatalog;
 use super::super::store::LocalBackend;
@@ -94,6 +95,18 @@ where
 
     async fn partitions(&self) -> Result<Vec<S::Partition>, Error> {
         self.discover_partitions()
+    }
+
+    async fn prepare_connection_for_partition(
+        &self,
+        partition: &S::Partition,
+        conn: &Connection,
+    ) -> Result<(), Error> {
+        if let PartitionName::Named(name) = self.strategy.partition_name(partition) {
+            database::ensure_partition_name(conn, name).await?;
+        }
+
+        Ok(())
     }
 }
 

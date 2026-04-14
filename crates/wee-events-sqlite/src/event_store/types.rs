@@ -88,6 +88,21 @@ pub trait NamedTargetProvisioner: Send + Sync {
     async fn names(&self) -> Result<Vec<String>, Error> {
         Ok(Vec::new())
     }
+
+    /// Enumerates existing backend targets keyed by their backend-facing names.
+    async fn named_targets(&self) -> Result<Vec<(String, DatabaseTarget)>, Error> {
+        let mut targets = Vec::new();
+        for name in self.names().await? {
+            let Some(target) = self
+                .target_for_existing_name(PartitionName::Named(&name))
+                .await?
+            else {
+                continue;
+            };
+            targets.push((name, target));
+        }
+        Ok(targets)
+    }
 }
 
 /// Provisioner for a single default sqld database.

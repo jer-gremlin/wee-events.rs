@@ -1,6 +1,7 @@
 use crate::Error;
 
 use super::types::DatabaseTarget;
+use libsql::Connection;
 
 /// Maps logical partitions to concrete database targets.
 ///
@@ -16,4 +17,12 @@ pub trait PartitionCatalog<P>: Send + Sync {
     ) -> Result<Option<DatabaseTarget>, Error>;
 
     async fn partitions(&self) -> Result<Vec<P>, Error>;
+
+    async fn prepare_connection_for_partition(
+        &self,
+        _partition: &P,
+        _conn: &Connection,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
 }

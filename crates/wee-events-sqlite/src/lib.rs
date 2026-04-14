@@ -6,6 +6,8 @@ mod projections;
 
 pub use document_store::{Document, DocumentStore};
 pub use error::Error;
+#[cfg(feature = "turso")]
+pub use event_store::turso_platform::{TursoPlatformConfig, TursoPlatformProvisioner};
 pub use event_store::{
     AggregatePartition, AggregateStrategy, BucketPartition, DatabaseTarget, GlobalPartition,
     GlobalStrategy, HashedStrategy, InMemoryStore, LocalPartitionLayout, LocalPartitionStrategy,
@@ -15,6 +17,4 @@ pub use event_store::{
     SingleTargetProvisioner, SqldDefaultProvisioner, SqldNamespacedPartitionStrategy,
     SqldNamespacedProvisioner, SqliteEventStore, TursoProvisioner, TypePartition, TypeStrategy,
 };
-#[cfg(feature = "turso")]
-pub use event_store::turso_platform::{TursoPlatformConfig, TursoPlatformProvisioner};
 pub use projections::{apply_projection, rebuild_projection};

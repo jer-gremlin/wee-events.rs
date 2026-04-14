@@ -1,18 +1,48 @@
 mod api;
 mod sanitize;
 
-#[cfg(feature = "turso")]
-pub use api::TursoHttpClient;
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
+use futures_util::future::try_join_all;
+
+use crate::database;
 use crate::Error;
-use api::{ApiError, TursoPlatformApi};
-use sanitize::sanitize_database_name;
+use api::{ApiError, DatabaseInfo, TursoPlatformApi};
+use sanitize::{named_database_prefix, sanitize_database_name};
 
 use super::strategies::PartitionName;
 use super::types::{DatabaseTarget, NamedTargetProvisioner, TursoProvisioner};
+
+#[allow(async_fn_in_trait)]
+trait PartitionMetadataStore: Send + Sync {
+    async fn ensure_partition_name(
+        &self,
+        target: &DatabaseTarget,
+        logical_name: &str,
+    ) -> Result<(), Error>;
+
+    async fn load_partition_name(&self, target: &DatabaseTarget) -> Result<Option<String>, Error>;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LibsqlPartitionMetadataStore;
+
+impl PartitionMetadataStore for LibsqlPartitionMetadataStore {
+    async fn ensure_partition_name(
+        &self,
+        target: &DatabaseTarget,
+        logical_name: &str,
+    ) -> Result<(), Error> {
+        let conn = database::open_event_store_connection(target).await?;
+        database::ensure_partition_name(&conn, logical_name).await
+    }
+
+    async fn load_partition_name(&self, target: &DatabaseTarget) -> Result<Option<String>, Error> {
+        let conn = database::open_event_store_connection(target).await?;
+        database::load_partition_name(&conn).await
+    }
+}
 
 /// Configuration for connecting to the Turso Platform API.
 ///
@@ -75,31 +105,14 @@ impl TursoPlatformConfig {
 /// Production provisioner that creates per-partition Turso databases via the
 /// Platform API.
 ///
-/// Each partition name is sanitized into a valid Turso database name
-/// (`{prefix}-{sanitized}`), created on demand, and connected to using the
-/// group-level auth token.
-///
-/// # Examples
-///
-/// ```text
-/// let config = TursoPlatformConfig {
-///     org: "my-org".into(),
-///     group: "default".into(),
-///     prefix: "myapp".into(),
-///     api_token: "turso-api-token".into(),
-///     group_token: "group-auth-token".into(),
-///     base_url: None,
-/// };
-/// let provisioner = TursoPlatformProvisioner::new(config);
-///
-/// let store = SqliteEventStore::builder()
-///     .turso(provisioner)
-///     .strategy(TypeStrategy)
-///     .open()
-///     .await?;
-/// ```
-pub struct TursoPlatformProvisioner<A = api::TursoHttpClient> {
+/// Each partition name is sanitized into a valid Turso database name,
+/// created on demand, and connected to using the group-level auth token.
+pub type TursoPlatformProvisioner<A = api::TursoHttpClient> =
+    TursoPlatformProvisionerImpl<A, LibsqlPartitionMetadataStore>;
+
+pub struct TursoPlatformProvisionerImpl<A, M> {
     api: A,
+    metadata: M,
     group: String,
     prefix: String,
     group_token: String,
@@ -108,7 +121,7 @@ pub struct TursoPlatformProvisioner<A = api::TursoHttpClient> {
 }
 
 #[cfg(feature = "turso")]
-impl TursoPlatformProvisioner {
+impl TursoPlatformProvisionerImpl<api::TursoHttpClient, LibsqlPartitionMetadataStore> {
     /// Create a new provisioner from configuration.
     pub fn new(config: TursoPlatformConfig) -> Self {
         let base_url = config
@@ -119,10 +132,33 @@ impl TursoPlatformProvisioner {
     }
 }
 
-impl<A: TursoPlatformApi> TursoPlatformProvisioner<A> {
+impl<A: TursoPlatformApi> TursoPlatformProvisionerImpl<A, LibsqlPartitionMetadataStore> {
     fn with_api(api: A, group: String, prefix: String, group_token: String) -> Self {
         Self {
             api,
+            group,
+            prefix,
+            group_token,
+            metadata: LibsqlPartitionMetadataStore,
+            cache: Mutex::new(HashMap::new()),
+            known_names: Mutex::new(HashSet::new()),
+        }
+    }
+}
+
+#[allow(private_bounds)]
+impl<A: TursoPlatformApi, M: PartitionMetadataStore> TursoPlatformProvisionerImpl<A, M> {
+    #[cfg(test)]
+    fn with_api_and_metadata(
+        api: A,
+        metadata: M,
+        group: String,
+        prefix: String,
+        group_token: String,
+    ) -> Self {
+        Self {
+            api,
+            metadata,
             group,
             prefix,
             group_token,
@@ -134,24 +170,22 @@ impl<A: TursoPlatformApi> TursoPlatformProvisioner<A> {
     /// Delete all databases created by this provisioner (tracked in cache).
     /// Also deletes any databases matching the prefix found via the API.
     pub async fn cleanup(&self) -> Result<(), Error> {
-        // Collect names from cache
-        let cached: Vec<String> = self.cache.lock().unwrap().keys().cloned().collect();
+        let default_db_name = self.db_name_for(PartitionName::Default);
+        let named_db_prefix = self.named_db_prefix();
 
-        // Also list from API to catch databases from previous runs
+        let cached: Vec<String> = self.cache.lock().unwrap().keys().cloned().collect();
         let api_dbs = self
             .api
             .list_databases(&self.group)
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
 
-        let prefix_match = format!("{}-", self.prefix);
         let mut to_delete: HashSet<String> = cached.into_iter().collect();
-        // Include the bare prefix database (Default partition)
-        if self.cache.lock().unwrap().contains_key(&self.prefix) {
-            to_delete.insert(self.prefix.clone());
+        if self.cache.lock().unwrap().contains_key(&default_db_name) {
+            to_delete.insert(default_db_name.clone());
         }
         for db in &api_dbs {
-            if db.name == self.prefix || db.name.starts_with(&prefix_match) {
+            if db.name == default_db_name || db.name.starts_with(&named_db_prefix) {
                 to_delete.insert(db.name.clone());
             }
         }
@@ -163,7 +197,6 @@ impl<A: TursoPlatformApi> TursoPlatformProvisioner<A> {
                 .map_err(|e| Error::Internal(format!("failed to delete {name}: {e}")))?;
         }
 
-        // Clear caches
         self.cache.lock().unwrap().clear();
         self.known_names.lock().unwrap().clear();
 
@@ -175,6 +208,32 @@ impl<A: TursoPlatformApi> TursoPlatformProvisioner<A> {
             PartitionName::Default => sanitize_database_name("", &self.prefix),
             PartitionName::Named(n) => sanitize_database_name(n, &self.prefix),
         }
+    }
+
+    fn named_db_prefix(&self) -> String {
+        format!("{}-", named_database_prefix(&self.prefix))
+    }
+
+    fn is_managed_named_database(&self, db_name: &str) -> bool {
+        db_name != self.db_name_for(PartitionName::Default) && db_name.starts_with(&self.named_db_prefix())
+    }
+
+    async fn lookup_existing_database(&self, db_name: &str) -> Result<Option<DatabaseInfo>, Error> {
+        self.api
+            .get_database(db_name)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))
+    }
+
+    async fn find_existing_database(
+        &self,
+        name: PartitionName<'_>,
+    ) -> Result<Option<(String, DatabaseInfo)>, Error> {
+        let db_name = self.db_name_for(name);
+        if let Some(info) = self.lookup_existing_database(&db_name).await? {
+            return Ok(Some((db_name, info)));
+        }
+        Ok(None)
     }
 
     fn record_name(&self, name: PartitionName<'_>) {
@@ -189,21 +248,47 @@ impl<A: TursoPlatformApi> TursoPlatformProvisioner<A> {
             auth_token: self.group_token.clone(),
         }
     }
+
+    async fn persist_logical_name(
+        &self,
+        name: PartitionName<'_>,
+        target: &DatabaseTarget,
+    ) -> Result<(), Error> {
+        let PartitionName::Named(logical_name) = name else {
+            return Ok(());
+        };
+
+        self.metadata
+            .ensure_partition_name(target, logical_name)
+            .await
+    }
 }
 
-impl<A: TursoPlatformApi> NamedTargetProvisioner for TursoPlatformProvisioner<A> {
+#[allow(private_bounds)]
+impl<A: TursoPlatformApi, M: PartitionMetadataStore> NamedTargetProvisioner
+    for TursoPlatformProvisionerImpl<A, M>
+{
     async fn ensure_target_for_name(
         &self,
         name: PartitionName<'_>,
     ) -> Result<DatabaseTarget, Error> {
         let db_name = self.db_name_for(name);
 
-        // Check cache
         if let Some(target) = self.cache.lock().unwrap().get(&db_name) {
             return Ok(target.clone());
         }
 
-        // Create database (handle AlreadyExists by fetching)
+        if let Some((existing_name, info)) = self.find_existing_database(name).await? {
+            let target = self.make_target(&info.hostname);
+            self.persist_logical_name(name, &target).await?;
+            self.cache
+                .lock()
+                .unwrap()
+                .insert(existing_name, target.clone());
+            self.record_name(name);
+            return Ok(target);
+        }
+
         let info = match self.api.create_database(&db_name, &self.group).await {
             Ok(info) => info,
             Err(ApiError::AlreadyExists) => self
@@ -225,10 +310,8 @@ impl<A: TursoPlatformApi> NamedTargetProvisioner for TursoPlatformProvisioner<A>
         };
 
         let target = self.make_target(&info.hostname);
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(db_name, target.clone());
+        self.persist_logical_name(name, &target).await?;
+        self.cache.lock().unwrap().insert(db_name, target.clone());
         self.record_name(name);
         Ok(target)
     }
@@ -238,79 +321,196 @@ impl<A: TursoPlatformApi> NamedTargetProvisioner for TursoPlatformProvisioner<A>
         name: PartitionName<'_>,
     ) -> Result<Option<DatabaseTarget>, Error> {
         let db_name = self.db_name_for(name);
-
-        // Check cache
         if let Some(target) = self.cache.lock().unwrap().get(&db_name) {
             return Ok(Some(target.clone()));
         }
 
-        // Query API
-        let Some(info) = self
-            .api
-            .get_database(&db_name)
-            .await
-            .map_err(|e| Error::Internal(e.to_string()))?
-        else {
+        let Some((db_name, info)) = self.find_existing_database(name).await? else {
             return Ok(None);
         };
 
         let target = self.make_target(&info.hostname);
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(db_name, target.clone());
+        self.persist_logical_name(name, &target).await?;
+        self.cache.lock().unwrap().insert(db_name, target.clone());
         self.record_name(name);
         Ok(Some(target))
     }
 
     async fn names(&self) -> Result<Vec<String>, Error> {
-        // Prefer in-memory cache of original names
-        let known = self.known_names.lock().unwrap();
-        if !known.is_empty() {
-            return Ok(known.iter().cloned().collect());
+        let known_names: Vec<String> = {
+            let known = self.known_names.lock().unwrap();
+            known.iter().cloned().collect()
+        };
+        if !known_names.is_empty() {
+            return Ok(known_names);
         }
-        drop(known);
 
-        // Fallback: list from API, strip prefix (best-effort, lossy)
         let databases = self
             .api
             .list_databases(&self.group)
             .await
             .map_err(|e| Error::Internal(e.to_string()))?;
 
-        let prefix_dash = format!("{}-", self.prefix);
-        Ok(databases
-            .into_iter()
-            .filter_map(|db| db.name.strip_prefix(&prefix_dash).map(String::from))
-            .collect())
+        let mut names: Vec<String> = try_join_all(databases.into_iter().filter_map(|db| {
+            if !self.is_managed_named_database(&db.name) {
+                return None;
+            }
+
+            Some(async move {
+                let target = self.make_target(&db.hostname);
+                self.cache
+                    .lock()
+                    .unwrap()
+                    .insert(db.name.clone(), target.clone());
+
+                self.metadata
+                    .load_partition_name(&target)
+                    .await?
+                    .ok_or_else(|| {
+                        Error::Configuration(format!(
+                            "database '{}' is missing logical partition metadata",
+                            db.name
+                        ))
+                    })
+            })
+        }))
+        .await?;
+        names.sort();
+        names.dedup();
+        self.known_names.lock().unwrap().extend(names.iter().cloned());
+        Ok(names)
+    }
+
+    async fn named_targets(&self) -> Result<Vec<(String, DatabaseTarget)>, Error> {
+        let databases = self
+            .api
+            .list_databases(&self.group)
+            .await
+            .map_err(|e| Error::Internal(e.to_string()))?;
+
+        let default_db_name = self.db_name_for(PartitionName::Default);
+        let named_db_prefix = self.named_db_prefix();
+        let mut targets = Vec::new();
+        let mut cache = self.cache.lock().unwrap();
+        for db in databases {
+            if db.name == default_db_name {
+                continue;
+            }
+            let Some(stripped_name) = db.name.strip_prefix(&named_db_prefix) else {
+                continue;
+            };
+
+            let target = self.make_target(&db.hostname);
+            cache.insert(db.name.clone(), target.clone());
+            targets.push((stripped_name.to_string(), target));
+        }
+
+        Ok(targets)
     }
 }
 
-impl<A: TursoPlatformApi> TursoProvisioner for TursoPlatformProvisioner<A> {}
+#[allow(private_bounds)]
+impl<A: TursoPlatformApi, M: PartitionMetadataStore> TursoProvisioner
+    for TursoPlatformProvisionerImpl<A, M>
+{
+}
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
     use api::fake::FakeTursoPlatformApi;
-    use std::sync::atomic::Ordering;
+
+    #[derive(Default)]
+    struct FakePartitionMetadataStore {
+        names: Mutex<HashMap<String, String>>,
+        ensure_calls: AtomicUsize,
+        load_calls: AtomicUsize,
+    }
+
+    impl FakePartitionMetadataStore {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn target_key(target: &DatabaseTarget) -> String {
+            match target {
+                DatabaseTarget::Turso { url, .. } => url.clone(),
+                other => panic!("unexpected target for fake metadata store: {other:?}"),
+            }
+        }
+
+        fn seed(&self, target: &DatabaseTarget, logical_name: &str) {
+            self.names
+                .lock()
+                .unwrap()
+                .insert(Self::target_key(target), logical_name.to_string());
+        }
+    }
+
+    impl PartitionMetadataStore for Arc<FakePartitionMetadataStore> {
+        async fn ensure_partition_name(
+            &self,
+            target: &DatabaseTarget,
+            logical_name: &str,
+        ) -> Result<(), Error> {
+            self.ensure_calls.fetch_add(1, Ordering::Relaxed);
+            let key = FakePartitionMetadataStore::target_key(target);
+            let mut names = self.names.lock().unwrap();
+
+            if let Some(recorded_name) = names.get(&key) {
+                if recorded_name != logical_name {
+                    return Err(Error::Configuration(format!(
+                        "logical partition name mismatch: target is recorded as '{recorded_name}' but was opened for '{logical_name}'"
+                    )));
+                }
+                return Ok(());
+            }
+
+            names.insert(key, logical_name.to_string());
+            Ok(())
+        }
+
+        async fn load_partition_name(
+            &self,
+            target: &DatabaseTarget,
+        ) -> Result<Option<String>, Error> {
+            self.load_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(self
+                .names
+                .lock()
+                .unwrap()
+                .get(&FakePartitionMetadataStore::target_key(target))
+                .cloned())
+        }
+    }
+
+    type TestApi = Arc<FakeTursoPlatformApi>;
+    type TestMetadata = Arc<FakePartitionMetadataStore>;
+    type TestProvisioner = TursoPlatformProvisionerImpl<TestApi, TestMetadata>;
 
     fn test_provisioner() -> (
-        std::sync::Arc<FakeTursoPlatformApi>,
-        TursoPlatformProvisioner<std::sync::Arc<FakeTursoPlatformApi>>,
+        TestApi,
+        TestMetadata,
+        TestProvisioner,
     ) {
-        let api = std::sync::Arc::new(FakeTursoPlatformApi::new());
-        let provisioner = TursoPlatformProvisioner::with_api(
+        let api = Arc::new(FakeTursoPlatformApi::new());
+        let metadata = Arc::new(FakePartitionMetadataStore::new());
+        let provisioner = TestProvisioner::with_api_and_metadata(
             api.clone(),
+            metadata.clone(),
             "default".to_string(),
             "myapp".to_string(),
             "group-tok-123".to_string(),
         );
-        (api, provisioner)
+        (api, metadata, provisioner)
     }
 
     #[tokio::test]
     async fn ensure_creates_database_and_returns_turso_target() {
-        let (_api, provisioner) = test_provisioner();
+        let (_api, _metadata, provisioner) = test_provisioner();
         let target = provisioner
             .ensure_target_for_name(PartitionName::Named("orders"))
             .await
@@ -319,7 +519,10 @@ mod tests {
         assert_eq!(
             target,
             DatabaseTarget::Turso {
-                url: "libsql://myapp-orders-testorg.turso.io".to_string(),
+                url: format!(
+                    "libsql://{}-testorg.turso.io",
+                    sanitize_database_name("orders", "myapp")
+                ),
                 auth_token: "group-tok-123".to_string(),
             }
         );
@@ -327,7 +530,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_default_partition_uses_prefix_only() {
-        let (_api, provisioner) = test_provisioner();
+        let (_api, _metadata, provisioner) = test_provisioner();
         let target = provisioner
             .ensure_target_for_name(PartitionName::Default)
             .await
@@ -344,7 +547,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_returns_cached_on_second_call() {
-        let (api, provisioner) = test_provisioner();
+        let (api, _metadata, provisioner) = test_provisioner();
         provisioner
             .ensure_target_for_name(PartitionName::Named("orders"))
             .await
@@ -359,9 +562,8 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_handles_already_exists_by_fetching() {
-        let (api, provisioner) = test_provisioner();
-        // Pre-create so next ensure hits AlreadyExists
-        api.create_database("myapp-orders", "default")
+        let (api, _metadata, provisioner) = test_provisioner();
+        api.create_database(&sanitize_database_name("orders", "myapp"), "default")
             .await
             .unwrap();
 
@@ -370,26 +572,29 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(api.create_calls.load(Ordering::Relaxed), 2); // our call + pre-create
+        assert_eq!(api.create_calls.load(Ordering::Relaxed), 1);
         assert_eq!(api.get_calls.load(Ordering::Relaxed), 1);
         assert!(matches!(target, DatabaseTarget::Turso { .. }));
     }
 
     #[tokio::test]
     async fn ensure_sanitizes_partition_name() {
-        let (api, provisioner) = test_provisioner();
+        let (api, _metadata, provisioner) = test_provisioner();
         provisioner
             .ensure_target_for_name(PartitionName::Named("Tenant:ACME"))
             .await
             .unwrap();
 
-        // The fake stores the sanitized name
-        assert!(api.get_database("myapp-tenant-acme").await.unwrap().is_some());
+        assert!(api
+            .get_database(&sanitize_database_name("Tenant:ACME", "myapp"))
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
     async fn ensure_records_original_name() {
-        let (_api, provisioner) = test_provisioner();
+        let (_api, _metadata, provisioner) = test_provisioner();
         provisioner
             .ensure_target_for_name(PartitionName::Named("orders"))
             .await
@@ -400,8 +605,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ensure_persists_partition_metadata_for_named_targets() {
+        let (_api, metadata, provisioner) = test_provisioner();
+        let target = provisioner
+            .ensure_target_for_name(PartitionName::Named("tenant/acme:blue"))
+            .await
+            .expect("target should resolve");
+
+        assert_eq!(
+            metadata
+                .load_partition_name(&target)
+                .await
+                .expect("metadata lookup should succeed"),
+            Some("tenant/acme:blue".to_string())
+        );
+    }
+
+    #[tokio::test]
     async fn existing_returns_cached() {
-        let (api, provisioner) = test_provisioner();
+        let (api, _metadata, provisioner) = test_provisioner();
         provisioner
             .ensure_target_for_name(PartitionName::Named("orders"))
             .await
@@ -414,14 +636,13 @@ mod tests {
             .unwrap();
 
         assert!(target.is_some());
-        assert_eq!(api.get_calls.load(Ordering::Relaxed), 0); // no API call
+        assert_eq!(api.get_calls.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test]
     async fn existing_falls_back_to_api() {
-        let (api, provisioner) = test_provisioner();
-        // Pre-create directly in API (not through provisioner)
-        api.create_database("myapp-orders", "default")
+        let (api, metadata, provisioner) = test_provisioner();
+        api.create_database(&sanitize_database_name("orders", "myapp"), "default")
             .await
             .unwrap();
 
@@ -432,11 +653,12 @@ mod tests {
 
         assert!(target.is_some());
         assert_eq!(api.get_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(metadata.ensure_calls.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
     async fn existing_returns_none_for_unknown() {
-        let (_api, provisioner) = test_provisioner();
+        let (_api, _metadata, provisioner) = test_provisioner();
         let target = provisioner
             .target_for_existing_name(PartitionName::Named("missing"))
             .await
@@ -446,7 +668,7 @@ mod tests {
 
     #[tokio::test]
     async fn names_returns_known_names_from_cache() {
-        let (_api, provisioner) = test_provisioner();
+        let (_api, _metadata, provisioner) = test_provisioner();
         provisioner
             .ensure_target_for_name(PartitionName::Named("orders"))
             .await
@@ -462,22 +684,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn names_falls_back_to_api_when_cache_empty() {
-        let (api, provisioner) = test_provisioner();
-        // Create directly in API (bypassing provisioner cache)
-        api.create_database("myapp-orders", "default")
+    async fn names_reads_exact_logical_names_from_metadata() {
+        let (api, metadata, provisioner) = test_provisioner();
+        let created = api
+            .create_database(&sanitize_database_name("orders", "myapp"), "default")
+            .await
+            .expect("database should be created");
+        metadata.seed(&provisioner.make_target(&created.hostname), "tenant/acme:blue");
+
+        let names = provisioner.names().await.expect("names should enumerate");
+        assert_eq!(names, vec!["tenant/acme:blue".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn names_errors_when_metadata_is_missing() {
+        let (api, _metadata, provisioner) = test_provisioner();
+        api.create_database(&sanitize_database_name("orders", "myapp"), "default")
+            .await
+            .expect("database should be created");
+
+        let error = provisioner
+            .names()
+            .await
+            .expect_err("missing metadata should fail");
+
+        assert!(error
+            .to_string()
+            .contains("missing logical partition metadata"));
+    }
+
+    #[tokio::test]
+    async fn names_fallback_uses_sanitized_default_prefix() {
+        let api = Arc::new(FakeTursoPlatformApi::new());
+        let metadata = Arc::new(FakePartitionMetadataStore::new());
+        let provisioner = TestProvisioner::with_api_and_metadata(
+            api.clone(),
+            metadata.clone(),
+            "default".to_string(),
+            "My_App".to_string(),
+            "group-tok-123".to_string(),
+        );
+        let created = api
+            .create_database(&sanitize_database_name("orders", "My_App"), "default")
             .await
             .unwrap();
-        api.create_database("other-db", "default").await.unwrap();
+        metadata.seed(&provisioner.make_target(&created.hostname), "orders");
 
         let names = provisioner.names().await.unwrap();
-        // Only "myapp-orders" matches the prefix; "other-db" is filtered out
         assert_eq!(names, vec!["orders".to_string()]);
     }
 
     #[test]
     fn from_env_returns_error_on_missing_var() {
-        // Clear any existing vars
         std::env::remove_var("TURSO_ORG");
         let result = TursoPlatformConfig::from_env();
         assert!(result.is_err());

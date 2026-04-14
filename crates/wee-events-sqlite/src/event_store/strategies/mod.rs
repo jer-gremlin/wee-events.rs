@@ -5,6 +5,8 @@ use wee_events::{AggregateId, AggregateType};
 
 use crate::Error;
 
+use super::types::DatabaseTarget;
+
 mod by_aggregate;
 mod by_type;
 mod global;
@@ -63,10 +65,19 @@ pub trait PartitionStrategy: Clone + Send + Sync + 'static {
 /// - other backends may use the name as an in-process routing key
 ///
 /// A partition name does not imply anything about on-disk filenames.
+#[allow(async_fn_in_trait)]
 pub trait PartitionNamingStrategy: PartitionStrategy {
     fn partition_name<'a>(&self, partition: &'a Self::Partition) -> PartitionName<'a>;
 
     fn partition_from_name(&self, name: &str) -> Result<Self::Partition, Error>;
+
+    async fn partition_from_target_name(
+        &self,
+        name: &str,
+        _target: &DatabaseTarget,
+    ) -> Result<Option<Self::Partition>, Error> {
+        self.partition_from_name(name).map(Some)
+    }
 }
 
 /// Partition strategy behavior needed by the local filesystem-backed catalog.

@@ -32,6 +32,7 @@ impl From<Error> for wee_events::Error {
 #[cfg(test)]
 mod tests {
     use super::Error;
+    use wee_events::{RetryDiagnostics, Revision};
 
     #[test]
     fn sqlite_serialization_errors_remain_domain_serialization_errors() {
@@ -51,5 +52,31 @@ mod tests {
 
         assert!(matches!(error, wee_events::Error::Store(_)));
         assert_eq!(error.to_string(), "internal error: boom");
+    }
+
+    #[test]
+    fn sqlite_retry_exhausted_errors_preserve_retry_diagnostics() {
+        let diagnostics = RetryDiagnostics {
+            last_attempted_revision: Revision::new("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+            observed_max_revision: Revision::new("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+            possible_clock_skew_ms: Some(17),
+        };
+
+        let error: wee_events::Error = Error::WeeEvents(wee_events::Error::RetryExhausted {
+            attempts: 5,
+            diagnostics: diagnostics.clone(),
+        })
+        .into();
+
+        match error {
+            wee_events::Error::RetryExhausted {
+                attempts,
+                diagnostics: actual,
+            } => {
+                assert_eq!(attempts, 5);
+                assert_eq!(actual, diagnostics);
+            }
+            other => panic!("expected RetryExhausted, got {other}"),
+        }
     }
 }
