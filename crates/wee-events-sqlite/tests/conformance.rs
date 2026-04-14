@@ -27,18 +27,13 @@ use wee_events_sqlite::{
 };
 
 macro_rules! optional_store_test_suite {
-    ($mod_name:ident, $make_store:expr) => {
+    ($mod_name:ident, $guard:expr, $make_store:expr) => {
         mod $mod_name {
             use super::*;
 
-            fn turso_env_present() -> bool {
-                std::env::var("TURSO_DATABASE_URL").is_ok()
-                    && std::env::var("TURSO_AUTH_TOKEN").is_ok()
-            }
-
             #[tokio::test]
             async fn load_initial() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -47,7 +42,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn loads_revision_with_events() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -56,7 +51,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn publishes_single_event() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -65,7 +60,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn publishes_multiple_events() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -74,7 +69,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn validate_event_content() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -83,7 +78,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn publishes_with_expected_initial_revision() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -92,7 +87,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn publishes_with_expected_revision() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -101,7 +96,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn revision_conflict_on_initial_revision() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -110,7 +105,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn revision_conflict_on_subsequent_revision() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -119,7 +114,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn causation() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -128,7 +123,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn stale_revision_detected_and_retry_succeeds() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -137,7 +132,7 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn empty_publish_returns_current_revision() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
@@ -146,11 +141,43 @@ macro_rules! optional_store_test_suite {
 
             #[tokio::test]
             async fn event_ordering_preserved() {
-                if !turso_env_present() {
+                if !($guard).await {
                     return;
                 }
                 let store = $make_store.await;
                 wee_events::testing::event_ordering_preserved(&store).await;
+            }
+        }
+    };
+}
+
+macro_rules! optional_shared_store_test_suite {
+    ($mod_name:ident, $guard:expr, $make_store_pair:expr) => {
+        mod $mod_name {
+            use super::*;
+
+            #[tokio::test]
+            async fn blind_appends_succeed_across_store_instances() {
+                if !($guard).await {
+                    return;
+                }
+                let (store_a, store_b) = $make_store_pair.await;
+                wee_events::testing::blind_appends_succeed_across_store_instances(
+                    &store_a, &store_b,
+                )
+                .await;
+            }
+
+            #[tokio::test]
+            async fn stale_revision_conflicts_across_store_instances() {
+                if !($guard).await {
+                    return;
+                }
+                let (store_a, store_b) = $make_store_pair.await;
+                wee_events::testing::stale_revision_conflicts_across_store_instances(
+                    &store_a, &store_b,
+                )
+                .await;
             }
         }
     };
@@ -164,17 +191,33 @@ wee_events::testing::store_test_suite!(
     sqlite_store_local_single,
     make_local_store(GlobalStrategy).await
 );
+wee_events::testing::shared_store_test_suite!(
+    sqlite_store_local_single_shared_backing,
+    make_local_store_pair(GlobalStrategy).await
+);
 wee_events::testing::store_test_suite!(
     sqlite_store_local_per_type,
     make_local_store(TypeStrategy).await
+);
+wee_events::testing::shared_store_test_suite!(
+    sqlite_store_local_per_type_shared_backing,
+    make_local_store_pair(TypeStrategy).await
 );
 wee_events::testing::store_test_suite!(
     sqlite_store_local_per_aggregate,
     make_local_store(AggregateStrategy).await
 );
+wee_events::testing::shared_store_test_suite!(
+    sqlite_store_local_per_aggregate_shared_backing,
+    make_local_store_pair(AggregateStrategy).await
+);
 wee_events::testing::store_test_suite!(
     sqlite_store_local_hashed,
     make_local_store(HashedStrategy::new(NonZeroU32::new(8).unwrap())).await
+);
+wee_events::testing::shared_store_test_suite!(
+    sqlite_store_local_hashed_shared_backing,
+    make_local_store_pair(HashedStrategy::new(NonZeroU32::new(8).unwrap())).await
 );
 wee_events::testing::store_test_suite!(
     sqlite_store_local_partition_by,
@@ -183,39 +226,93 @@ wee_events::testing::store_test_suite!(
     ))
     .await
 );
-
-wee_events::testing::store_test_suite!(
-    sqlite_store_remote_sqld_default_single,
-    make_remote_sqld_default_store(GlobalStrategy).await
-);
-wee_events::testing::store_test_suite!(
-    sqlite_store_remote_sqld_single,
-    make_remote_sqld_store(GlobalStrategy).await
-);
-wee_events::testing::store_test_suite!(
-    sqlite_store_remote_sqld_per_type,
-    make_remote_sqld_store(TypeStrategy).await
-);
-wee_events::testing::store_test_suite!(
-    sqlite_store_remote_sqld_per_aggregate,
-    make_remote_sqld_store(AggregateStrategy).await
-);
-wee_events::testing::store_test_suite!(
-    sqlite_store_remote_sqld_hashed,
-    make_remote_sqld_store(HashedStrategy::new(NonZeroU32::new(8).unwrap())).await
-);
-wee_events::testing::store_test_suite!(
-    sqlite_store_remote_sqld_partition_by,
-    make_remote_sqld_store(PartitionByStrategy::new(
+wee_events::testing::shared_store_test_suite!(
+    sqlite_store_local_partition_by_shared_backing,
+    make_local_store_pair(PartitionByStrategy::new(
         partition_by_user as fn(&AggregateId) -> String,
     ))
     .await
 );
 
 optional_store_test_suite!(
+    sqlite_store_remote_sqld_default_single,
+    sqld_available(),
+    make_remote_sqld_default_store(GlobalStrategy)
+);
+optional_shared_store_test_suite!(
+    sqlite_store_remote_sqld_default_single_shared_backing,
+    sqld_available(),
+    make_remote_sqld_default_store_pair(GlobalStrategy)
+);
+optional_store_test_suite!(
+    sqlite_store_remote_sqld_single,
+    sqld_available(),
+    make_remote_sqld_store(GlobalStrategy)
+);
+optional_shared_store_test_suite!(
+    sqlite_store_remote_sqld_single_shared_backing,
+    sqld_available(),
+    make_remote_sqld_store_pair(GlobalStrategy)
+);
+optional_store_test_suite!(
+    sqlite_store_remote_sqld_per_type,
+    sqld_available(),
+    make_remote_sqld_store(TypeStrategy)
+);
+optional_shared_store_test_suite!(
+    sqlite_store_remote_sqld_per_type_shared_backing,
+    sqld_available(),
+    make_remote_sqld_store_pair(TypeStrategy)
+);
+optional_store_test_suite!(
+    sqlite_store_remote_sqld_per_aggregate,
+    sqld_available(),
+    make_remote_sqld_store(AggregateStrategy)
+);
+optional_shared_store_test_suite!(
+    sqlite_store_remote_sqld_per_aggregate_shared_backing,
+    sqld_available(),
+    make_remote_sqld_store_pair(AggregateStrategy)
+);
+optional_store_test_suite!(
+    sqlite_store_remote_sqld_hashed,
+    sqld_available(),
+    make_remote_sqld_store(HashedStrategy::new(NonZeroU32::new(8).unwrap()))
+);
+optional_shared_store_test_suite!(
+    sqlite_store_remote_sqld_hashed_shared_backing,
+    sqld_available(),
+    make_remote_sqld_store_pair(HashedStrategy::new(NonZeroU32::new(8).unwrap()))
+);
+optional_store_test_suite!(
+    sqlite_store_remote_sqld_partition_by,
+    sqld_available(),
+    make_remote_sqld_store(PartitionByStrategy::new(
+        partition_by_user as fn(&AggregateId) -> String,
+    ))
+);
+optional_shared_store_test_suite!(
+    sqlite_store_remote_sqld_partition_by_shared_backing,
+    sqld_available(),
+    make_remote_sqld_store_pair(PartitionByStrategy::new(
+        partition_by_user as fn(&AggregateId) -> String,
+    ))
+);
+
+optional_store_test_suite!(
     sqlite_store_turso_default_partition,
+    async { turso_env_present() },
     make_turso_store(GlobalStrategy)
 );
+optional_shared_store_test_suite!(
+    sqlite_store_turso_default_partition_shared_backing,
+    async { turso_env_present() },
+    make_turso_store_pair(GlobalStrategy)
+);
+
+fn turso_env_present() -> bool {
+    std::env::var("TURSO_DATABASE_URL").is_ok() && std::env::var("TURSO_AUTH_TOKEN").is_ok()
+}
 
 async fn make_in_memory_store<S>(strategy: S) -> TempStore<InMemoryStore<S>>
 where
@@ -236,9 +333,9 @@ async fn make_local_store<S>(strategy: S) -> TempStore<LocalStore<S>>
 where
     S: LocalPartitionStrategy + LocalStorePath,
 {
-    let temp_dir = tempfile::tempdir().unwrap();
+    let temp_dir = Arc::new(tempfile::tempdir().unwrap());
     let store = SqliteEventStore::builder()
-        .local(S::local_store_path(&temp_dir))
+        .local(S::local_store_path(temp_dir.as_ref()))
         .strategy(strategy)
         .open()
         .await
@@ -252,13 +349,48 @@ where
     }
 }
 
+async fn make_local_store_pair<S>(strategy: S) -> (TempStore<LocalStore<S>>, TempStore<LocalStore<S>>)
+where
+    S: LocalPartitionStrategy + LocalStorePath + Clone,
+{
+    let temp_dir = Arc::new(tempfile::tempdir().unwrap());
+    let path = S::local_store_path(temp_dir.as_ref());
+    let store_a = SqliteEventStore::builder()
+        .local(&path)
+        .strategy(strategy.clone())
+        .open()
+        .await
+        .unwrap();
+    let store_b = SqliteEventStore::builder()
+        .local(&path)
+        .strategy(strategy)
+        .open()
+        .await
+        .unwrap();
+
+    (
+        TempStore {
+            _guard: TestStoreGuard::TempDir {
+                _temp_dir: Arc::clone(&temp_dir),
+            },
+            store: store_a,
+        },
+        TempStore {
+            _guard: TestStoreGuard::TempDir { _temp_dir: temp_dir },
+            store: store_b,
+        },
+    )
+}
+
 async fn make_remote_sqld_store<S>(
     strategy: S,
 ) -> TempStore<NamedRemoteStore<S, TestSqldNamespaceProvisioner>>
 where
     S: SqldNamespacedPartitionStrategy + PartitionNamingStrategy,
 {
-    let instance = shared_sqld_instance().await;
+    let instance = shared_sqld_instance()
+        .await
+        .expect("sqld availability should be checked before creating a store");
     let provisioner =
         TestSqldNamespaceProvisioner::new(instance.url.clone(), instance.admin_url.clone());
 
@@ -271,10 +403,44 @@ where
     }
 }
 
+async fn make_remote_sqld_store_pair<S>(
+    strategy: S,
+) -> (
+    TempStore<NamedRemoteStore<S, TestSqldNamespaceProvisioner>>,
+    TempStore<NamedRemoteStore<S, TestSqldNamespaceProvisioner>>,
+)
+where
+    S: SqldNamespacedPartitionStrategy + PartitionNamingStrategy + Clone,
+{
+    let instance = shared_sqld_instance()
+        .await
+        .expect("sqld availability should be checked before creating a store");
+    let provisioner =
+        TestSqldNamespaceProvisioner::new(instance.url.clone(), instance.admin_url.clone());
+
+    let store_a = open_sqld_store_with_retry(strategy.clone(), provisioner.clone()).await;
+    let store_b = open_sqld_store_with_retry(strategy, provisioner).await;
+    wait_until_remote_store_is_ready(&store_a).await;
+    wait_until_remote_store_is_ready(&store_b).await;
+
+    (
+        TempStore {
+            _guard: TestStoreGuard::None,
+            store: store_a,
+        },
+        TempStore {
+            _guard: TestStoreGuard::None,
+            store: store_b,
+        },
+    )
+}
+
 async fn make_remote_sqld_default_store(
     strategy: GlobalStrategy,
 ) -> TempStore<SingleRemoteStore<GlobalStrategy, TestSqldDefaultProvisioner>> {
-    let instance = shared_sqld_instance().await;
+    let instance = shared_sqld_instance()
+        .await
+        .expect("sqld availability should be checked before creating a store");
     let store = open_sqld_default_store_with_retry(
         strategy,
         TestSqldDefaultProvisioner {
@@ -288,6 +454,36 @@ async fn make_remote_sqld_default_store(
         _guard: TestStoreGuard::None,
         store,
     }
+}
+
+async fn make_remote_sqld_default_store_pair(
+    strategy: GlobalStrategy,
+) -> (
+    TempStore<SingleRemoteStore<GlobalStrategy, TestSqldDefaultProvisioner>>,
+    TempStore<SingleRemoteStore<GlobalStrategy, TestSqldDefaultProvisioner>>,
+) {
+    let instance = shared_sqld_instance()
+        .await
+        .expect("sqld availability should be checked before creating a store");
+    let provisioner = TestSqldDefaultProvisioner {
+        url: instance.url.clone(),
+    };
+
+    let store_a = open_sqld_default_store_with_retry(strategy, provisioner.clone()).await;
+    let store_b = open_sqld_default_store_with_retry(strategy, provisioner).await;
+    wait_until_remote_store_is_ready(&store_a).await;
+    wait_until_remote_store_is_ready(&store_b).await;
+
+    (
+        TempStore {
+            _guard: TestStoreGuard::None,
+            store: store_a,
+        },
+        TempStore {
+            _guard: TestStoreGuard::None,
+            store: store_b,
+        },
+    )
 }
 
 async fn make_turso_store<S>(
@@ -310,6 +506,44 @@ where
         _guard: TestStoreGuard::None,
         store,
     }
+}
+
+async fn make_turso_store_pair<S>(
+    strategy: S,
+) -> (
+    TempStore<NamedRemoteStore<S, FixedRemoteTargetProvisioner>>,
+    TempStore<NamedRemoteStore<S, FixedRemoteTargetProvisioner>>,
+)
+where
+    S: PartitionNamingStrategy + Clone,
+{
+    let url = std::env::var("TURSO_DATABASE_URL").unwrap();
+    let auth_token = std::env::var("TURSO_AUTH_TOKEN").unwrap();
+    let provisioner = FixedRemoteTargetProvisioner { url, auth_token };
+
+    let store_a = SqliteEventStore::builder()
+        .turso(provisioner.clone())
+        .strategy(strategy.clone())
+        .open()
+        .await
+        .unwrap();
+    let store_b = SqliteEventStore::builder()
+        .turso(provisioner)
+        .strategy(strategy)
+        .open()
+        .await
+        .unwrap();
+
+    (
+        TempStore {
+            _guard: TestStoreGuard::None,
+            store: store_a,
+        },
+        TempStore {
+            _guard: TestStoreGuard::None,
+            store: store_b,
+        },
+    )
 }
 
 async fn open_sqld_default_store_with_retry(
@@ -384,8 +618,12 @@ where
     }
 }
 
-async fn shared_sqld_instance() -> &'static SharedSqldInstance {
-    SHARED_SQLD
+async fn sqld_available() -> bool {
+    shared_sqld_instance().await.is_ok()
+}
+
+async fn shared_sqld_instance() -> Result<&'static SharedSqldInstance, String> {
+    match SHARED_SQLD
         .get_or_init(|| async {
             let image = GenericImage::new("ghcr.io/tursodatabase/libsql-server", "latest")
                 .with_exposed_port(8080.tcp())
@@ -399,19 +637,38 @@ async fn shared_sqld_instance() -> &'static SharedSqldInstance {
                     "0.0.0.0:9090",
                     "--enable-namespaces",
                 ]);
-            let container = Box::new(image.start().await.unwrap());
+            let container = Box::new(
+                image
+                    .start()
+                    .await
+                    .map_err(|error| format!("sqld container unavailable: {error}"))?,
+            );
             let container = Box::leak(container);
-            let host = container.get_host().await.unwrap().to_string();
-            let port = container.get_host_port_ipv4(8080.tcp()).await.unwrap();
-            let admin_port = container.get_host_port_ipv4(9090.tcp()).await.unwrap();
+            let host = container
+                .get_host()
+                .await
+                .map_err(|error| format!("sqld host lookup failed: {error}"))?
+                .to_string();
+            let port = container
+                .get_host_port_ipv4(8080.tcp())
+                .await
+                .map_err(|error| format!("sqld port lookup failed: {error}"))?;
+            let admin_port = container
+                .get_host_port_ipv4(9090.tcp())
+                .await
+                .map_err(|error| format!("sqld admin port lookup failed: {error}"))?;
 
-            SharedSqldInstance {
+            Ok(SharedSqldInstance {
                 _container: container,
                 url: format!("http://{host}:{port}"),
                 admin_url: format!("http://{host}:{admin_port}"),
-            }
+            })
         })
         .await
+    {
+        Ok(instance) => Ok(instance),
+        Err(error) => Err(error.clone()),
+    }
 }
 
 struct TempStore<T> {
@@ -439,7 +696,7 @@ where
 
 enum TestStoreGuard {
     None,
-    TempDir { _temp_dir: tempfile::TempDir },
+    TempDir { _temp_dir: Arc<tempfile::TempDir> },
 }
 
 struct SharedSqldInstance {
@@ -448,7 +705,7 @@ struct SharedSqldInstance {
     admin_url: String,
 }
 
-static SHARED_SQLD: OnceCell<SharedSqldInstance> = OnceCell::const_new();
+static SHARED_SQLD: OnceCell<Result<SharedSqldInstance, String>> = OnceCell::const_new();
 
 #[derive(Debug, Clone)]
 struct TestSqldDefaultProvisioner {
@@ -700,6 +957,18 @@ mod turso_platform_integration {
             && std::env::var("TURSO_GROUP_TOKEN").is_ok()
     }
 
+    async fn turso_platform_available() -> bool {
+        if !turso_platform_env_present() {
+            return false;
+        }
+
+        let Ok(config) = TursoPlatformConfig::from_env() else {
+            return false;
+        };
+
+        TursoPlatformProvisioner::new(config).names().await.is_ok()
+    }
+
     /// Creates a provisioner with a strategy-specific prefix so parallel
     /// test suites don't interfere with each other's cleanup.
     fn make_config(strategy_suffix: &str) -> TursoPlatformConfig {
@@ -722,7 +991,7 @@ mod turso_platform_integration {
 
                 #[tokio::test]
                 async fn conformance() {
-                    if !turso_platform_env_present() {
+                    if !turso_platform_available().await {
                         return;
                     }
 
@@ -754,6 +1023,27 @@ mod turso_platform_integration {
                     wee_events::testing::empty_publish_returns_current_revision(&store).await;
                     wee_events::testing::event_ordering_preserved(&store).await;
 
+                    let store_a = SqliteEventStore::builder()
+                        .turso(TursoPlatformProvisioner::new(config.clone()))
+                        .strategy($strategy)
+                        .open()
+                        .await
+                        .unwrap();
+                    let store_b = SqliteEventStore::builder()
+                        .turso(TursoPlatformProvisioner::new(config.clone()))
+                        .strategy($strategy)
+                        .open()
+                        .await
+                        .unwrap();
+                    wee_events::testing::blind_appends_succeed_across_store_instances(
+                        &store_a, &store_b,
+                    )
+                    .await;
+                    wee_events::testing::stale_revision_conflicts_across_store_instances(
+                        &store_a, &store_b,
+                    )
+                    .await;
+
                     // Clean up databases created during this test
                     let cleanup = TursoPlatformProvisioner::new(config);
                     cleanup.cleanup().await.expect("post-test cleanup");
@@ -765,10 +1055,7 @@ mod turso_platform_integration {
     turso_platform_test_suite!(tp_global, GlobalStrategy);
     turso_platform_test_suite!(tp_type, TypeStrategy);
     turso_platform_test_suite!(tp_agg, AggregateStrategy);
-    turso_platform_test_suite!(
-        tp_hash,
-        HashedStrategy::new(NonZeroU32::new(8).unwrap())
-    );
+    turso_platform_test_suite!(tp_hash, HashedStrategy::new(NonZeroU32::new(8).unwrap()));
     turso_platform_test_suite!(
         tp_part,
         PartitionByStrategy::new(partition_by_user as fn(&AggregateId) -> String)
