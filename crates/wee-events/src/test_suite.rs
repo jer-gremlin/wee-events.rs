@@ -424,6 +424,85 @@ pub async fn event_ordering_preserved(store: &impl EventStore) {
     }
 }
 
+/// Blind appends from independent store instances against the same backing
+/// store both succeed and remain visible to each other.
+pub async fn blind_appends_succeed_across_store_instances(
+    store_a: &impl EventStore,
+    store_b: &impl EventStore,
+) {
+    let id = make_test_aggregate_id();
+    let (_, raw1) = make_raw_events(1);
+
+    store_a
+        .publish(&id, PublishOptions::default(), raw1)
+        .await
+        .expect("first publish must succeed");
+
+    let snapshot_from_b = store_b
+        .load(&id)
+        .await
+        .expect("second store should observe first commit");
+    assert_eq!(snapshot_from_b.len(), 1);
+
+    let (_, raw2) = make_raw_events(1);
+    store_b
+        .publish(&id, PublishOptions::default(), raw2)
+        .await
+        .expect("second publish should succeed");
+
+    let snapshot_from_a = store_a
+        .load(&id)
+        .await
+        .expect("first store should observe second commit");
+    assert_eq!(snapshot_from_a.len(), 2);
+}
+
+/// Stale expected revisions must conflict across independent store instances
+/// that share the same backing store.
+pub async fn stale_revision_conflicts_across_store_instances(
+    store_a: &impl EventStore,
+    store_b: &impl EventStore,
+) {
+    let id = make_test_aggregate_id();
+    let (_, raw1) = make_raw_events(1);
+
+    store_a
+        .publish(&id, PublishOptions::default(), raw1)
+        .await
+        .expect("initial publish must succeed");
+
+    let stale_revision = store_a
+        .load(&id)
+        .await
+        .expect("first store should load current state")
+        .revision()
+        .clone();
+
+    let (_, raw2) = make_raw_events(1);
+    store_b
+        .publish(&id, PublishOptions::default(), raw2)
+        .await
+        .expect("concurrent publish should succeed");
+
+    let (_, raw3) = make_raw_events(1);
+    let error = store_a
+        .publish(
+            &id,
+            PublishOptions {
+                expected_revision: Some(stale_revision),
+                ..Default::default()
+            },
+            raw3,
+        )
+        .await
+        .expect_err("stale revision should be rejected");
+
+    match error {
+        crate::Error::RevisionConflict { .. } => {}
+        other => panic!("expected RevisionConflict, got: {other}"),
+    }
+}
+
 /// Generates a test module that runs the conformance suite against a store
 /// constructed by the provided factory expression.
 ///
@@ -516,6 +595,40 @@ macro_rules! store_test_suite {
             async fn event_ordering_preserved() {
                 let store = $factory;
                 $crate::testing::event_ordering_preserved(&store).await;
+            }
+        }
+    };
+}
+
+/// Generates a test module that runs the shared-backing conformance suite
+/// against two independently constructed store instances that target the same
+/// underlying persistence.
+///
+/// # Usage
+///
+/// ```text
+/// wee_events::testing::shared_store_test_suite!(my_suite, make_two_stores().await);
+/// ```
+#[macro_export]
+macro_rules! shared_store_test_suite {
+    ($mod_name:ident, $factory:expr) => {
+        mod $mod_name {
+            use super::*;
+
+            #[tokio::test]
+            async fn blind_appends_succeed_across_store_instances() {
+                let (store_a, store_b) = $factory;
+                $crate::testing::blind_appends_succeed_across_store_instances(&store_a, &store_b)
+                    .await;
+            }
+
+            #[tokio::test]
+            async fn stale_revision_conflicts_across_store_instances() {
+                let (store_a, store_b) = $factory;
+                $crate::testing::stale_revision_conflicts_across_store_instances(
+                    &store_a, &store_b,
+                )
+                .await;
             }
         }
     };

@@ -43,10 +43,7 @@ const BATCH_SIZES: &[usize] = &[1, 10, 50];
 /// aggregate type, which TypeStrategy maps to a distinct partition. Other
 /// strategies may or may not spread these across partitions.
 fn make_spread_id(index: usize) -> AggregateId {
-    AggregateId::new(
-        format!("spread-{index}"),
-        ulid::Ulid::new().to_string(),
-    )
+    AggregateId::new(format!("spread-{index}"), ulid::Ulid::new().to_string())
 }
 
 /// Creates an aggregate ID that shares a single aggregate type with all other
@@ -61,12 +58,7 @@ fn make_test_id() -> AggregateId {
 }
 
 /// Seeds an aggregate with `n` events. Returns the aggregate ID.
-fn seed_aggregate<S: EventStore>(
-    rt: &Runtime,
-    store: &S,
-    id: &AggregateId,
-    event_count: usize,
-) {
+fn seed_aggregate<S: EventStore>(rt: &Runtime, store: &S, id: &AggregateId, event_count: usize) {
     if event_count == 0 {
         return;
     }
@@ -211,17 +203,20 @@ pub fn bench_publish_with_revision<S: EventStore>(
     let id = make_test_id();
     seed_aggregate(rt, store, &id, 1);
 
-    c.bench_function(&format!("{prefix}/steady_state/publish_with_revision"), |b| {
-        b.to_async(rt).iter(|| async {
-            let agg = store.load(&id).await.unwrap();
-            let (_, raw) = make_raw_events(1);
-            let opts = PublishOptions {
-                expected_revision: Some(agg.revision().clone()),
-                ..Default::default()
-            };
-            store.publish(&id, opts, raw).await.unwrap();
-        });
-    });
+    c.bench_function(
+        &format!("{prefix}/steady_state/publish_with_revision"),
+        |b| {
+            b.to_async(rt).iter(|| async {
+                let agg = store.load(&id).await.unwrap();
+                let (_, raw) = make_raw_events(1);
+                let opts = PublishOptions {
+                    expected_revision: Some(agg.revision().clone()),
+                    ..Default::default()
+                };
+                store.publish(&id, opts, raw).await.unwrap();
+            });
+        },
+    );
 }
 
 /// Benchmark appending to a growing aggregate stream.
@@ -250,12 +245,7 @@ pub fn bench_publish_append<S: EventStore>(
 // ===========================================================================
 
 /// Benchmark loading aggregates with varying event counts.
-pub fn bench_load_scaling<S: EventStore>(
-    c: &mut Criterion,
-    rt: &Runtime,
-    store: &S,
-    prefix: &str,
-) {
+pub fn bench_load_scaling<S: EventStore>(c: &mut Criterion, rt: &Runtime, store: &S, prefix: &str) {
     let mut group = c.benchmark_group(format!("{prefix}/load_scaling"));
 
     // Empty aggregate (non-existent)
@@ -296,7 +286,7 @@ pub fn bench_write_spread<S: EventStore + 'static>(
     let mut group = c.benchmark_group(format!("{prefix}/partition_write/spread"));
     for &n in levels {
         // Pre-provision: each aggregate in its own partition.
-        let ids: Vec<_> = (0..n).map(|i| make_spread_id(i)).collect();
+        let ids: Vec<_> = (0..n).map(make_spread_id).collect();
         for id in &ids {
             seed_aggregate(rt, &**store, id, 10);
         }
@@ -394,9 +384,7 @@ pub fn bench_write_contention<S: EventStore + 'static>(
                             let id = id.clone();
                             async move {
                                 let (_, raw) = make_raw_events(1);
-                                let _ = store
-                                    .publish(&id, PublishOptions::default(), raw)
-                                    .await;
+                                let _ = store.publish(&id, PublishOptions::default(), raw).await;
                             }
                         })
                         .collect();
@@ -423,7 +411,7 @@ pub fn bench_read_spread<S: EventStore + 'static>(
 ) {
     let mut group = c.benchmark_group(format!("{prefix}/partition_read/spread"));
     for &n in levels {
-        let ids: Vec<_> = (0..n).map(|i| make_spread_id(i)).collect();
+        let ids: Vec<_> = (0..n).map(make_spread_id).collect();
         for id in &ids {
             seed_aggregate(rt, &**store, id, 50);
         }
@@ -505,7 +493,7 @@ pub fn bench_mixed_read_write<S: EventStore + 'static>(
     for &n in levels {
         // N readers + N writers = 2N total tasks, interleaved.
         // Even indices read, odd indices write.
-        let all_ids: Vec<_> = (0..2 * n).map(|i| make_spread_id(i)).collect();
+        let all_ids: Vec<_> = (0..2 * n).map(make_spread_id).collect();
         for id in &all_ids {
             seed_aggregate(rt, &**store, id, 50);
         }
