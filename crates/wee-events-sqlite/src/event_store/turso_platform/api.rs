@@ -1,17 +1,15 @@
 /// Information about a Turso database returned by the Platform API.
 #[derive(Debug, Clone)]
-pub(crate) struct DatabaseInfo {
+pub struct DatabaseInfo {
     pub hostname: String,
     pub name: String,
 }
 
 /// Errors from the Turso Platform API.
 #[derive(Debug)]
-pub(crate) enum ApiError {
+pub enum ApiError {
     /// Database already exists (409 Conflict).
     AlreadyExists,
-    /// Resource not found (404).
-    NotFound,
     /// Authentication or authorization failure (401/403).
     AuthFailure(String),
     /// Any other error.
@@ -22,7 +20,6 @@ impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AlreadyExists => write!(f, "database already exists"),
-            Self::NotFound => write!(f, "not found"),
             Self::AuthFailure(msg) => write!(f, "auth failure: {msg}"),
             Self::Unexpected(msg) => write!(f, "unexpected error: {msg}"),
         }
@@ -309,11 +306,17 @@ mod tests {
     #[tokio::test]
     async fn fake_create_succeeds_then_returns_already_exists() {
         let api = FakeTursoPlatformApi::new();
-        let info = api.create_database("myapp-orders", "default").await.unwrap();
+        let info = api
+            .create_database("myapp-orders", "default")
+            .await
+            .unwrap();
         assert_eq!(info.hostname, "myapp-orders-testorg.turso.io");
         assert_eq!(info.name, "myapp-orders");
 
-        let err = api.create_database("myapp-orders", "default").await.unwrap_err();
+        let err = api
+            .create_database("myapp-orders", "default")
+            .await
+            .unwrap_err();
         assert!(matches!(err, ApiError::AlreadyExists));
     }
 
@@ -326,7 +329,9 @@ mod tests {
     #[tokio::test]
     async fn fake_get_returns_some_for_known() {
         let api = FakeTursoPlatformApi::new();
-        api.create_database("myapp-orders", "default").await.unwrap();
+        api.create_database("myapp-orders", "default")
+            .await
+            .unwrap();
         let info = api.get_database("myapp-orders").await.unwrap().unwrap();
         assert_eq!(info.name, "myapp-orders");
     }
