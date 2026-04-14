@@ -121,7 +121,7 @@ fn generate(service: ServiceInput) -> TokenStream2 {
         .map(|entry| {
             let cmd = &entry.command_type;
             quote! {
-                impl wee_events::Handles<#cmd, ()> for #name {}
+                impl wee_events::Handles<#cmd> for #name {}
             }
         })
         .collect();
@@ -138,7 +138,7 @@ fn generate(service: ServiceInput) -> TokenStream2 {
                 #name::load(self, id)
             }
 
-            fn execute<C, Idx>(
+            fn execute<C>(
                 &self,
                 id: &wee_events::AggregateId,
                 cmd: C,
@@ -146,8 +146,8 @@ fn generate(service: ServiceInput) -> TokenStream2 {
                 Output = wee_events::Result<wee_events::Entity<#state_type>>,
             > + ::std::marker::Send + '_
             where
-                C: wee_events::Command + ::serde::Serialize + ::std::marker::Send + 'static,
-                Self: wee_events::Handles<C, Idx>,
+                C: wee_events::Command + ::std::marker::Send + 'static,
+                Self: wee_events::Handles<C>,
             {
                 #name::execute(self, id, cmd)
             }
@@ -238,11 +238,11 @@ fn generate(service: ServiceInput) -> TokenStream2 {
 
             /// Execute a typed command against the aggregate.
             ///
-            /// `Self: Handles<C, Idx>` is satisfied only for command types
+            /// `Self: Handles<C>` is satisfied only for command types
             /// registered in the `service!` invocation — unregistered commands
             /// produce a compile error. The actual dispatch is via `TypeId`
             /// lookup at runtime (zero-overhead compared to dyn vtable).
-            #vis fn execute<C, Idx>(
+            #vis fn execute<C>(
                 &self,
                 id: &wee_events::AggregateId,
                 cmd: C,
@@ -254,7 +254,7 @@ fn generate(service: ServiceInput) -> TokenStream2 {
                     + ::std::any::Any
                     + ::std::marker::Send
                     + 'static,
-                Self: wee_events::Handles<C, Idx>,
+                Self: wee_events::Handles<C>,
             {
                 let id = id.clone();
                 let type_id = ::std::any::TypeId::of::<C>();

@@ -95,7 +95,7 @@ async fn generated_service_loads() {
 /// business logic works whether it is given a local service or a remote client.
 async fn shared_caller<T>(svc: &T, id: &AggregateId) -> wee_events::Result<Entity<Counter>>
 where
-    T: TypedService<Counter> + Handles<Increment, ()> + Handles<Adjust, ()>,
+    T: TypedService<Counter> + Handles<Increment> + Handles<Adjust>,
 {
     let entity = svc.execute(id, Increment { amount: 10 }).await?;
     // Adjust is a no-op in this test implementation; it returns the entity as-is.

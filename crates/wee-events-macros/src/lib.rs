@@ -195,8 +195,8 @@ fn extract_prefix(input: &DeriveInput, attr_name: &str) -> syn::Result<String> {
 /// - `pub struct CounterServiceClient` — holds `reqwest::Client`, ingress URL, and service name
 /// - `CounterServiceClient::new(ingress_url, service_name)` — constructor
 /// - `CounterServiceClient::load(&self, id) -> impl Future<..>`
-/// - `CounterServiceClient::execute<C, Idx>(&self, id, cmd) -> impl Future<..>`
-/// - `impl Handles<Increment, ()> for CounterServiceClient` for each command
+/// - `CounterServiceClient::execute<C>(&self, id, cmd) -> impl Future<..>`
+/// - `impl Handles<Increment> for CounterServiceClient` for each command
 #[proc_macro]
 pub fn restate_service(input: TokenStream) -> TokenStream {
     restate_service_macro::expand(input)
@@ -224,9 +224,9 @@ pub fn restate_service(input: TokenStream) -> TokenStream {
 /// - `pub struct CounterService` — fully type-erased service struct (no generic parameters)
 /// - `CounterService::build(factory) -> CounterService` — constructor
 /// - `CounterService::load(&self, id) -> impl Future<..>`
-/// - `CounterService::execute<C, Idx>(&self, id, cmd) -> impl Future<..>`
-///   (requires `Self: Handles<C, Idx>` — satisfied by the registered commands)
-/// - `impl Handles<Increment, ()> for CounterService` for each command
+/// - `CounterService::execute<C>(&self, id, cmd) -> impl Future<..>`
+///   (requires `Self: Handles<C>` — satisfied by the registered commands)
+/// - `impl Handles<Increment> for CounterService` for each command
 /// - `impl TypedService<Counter> for CounterService`
 #[proc_macro]
 pub fn service(input: TokenStream) -> TokenStream {

@@ -1,28 +1,20 @@
-warning: unused import: `CommandName`
- --> tests/ui/unregistered_command.rs:2:40
-  |
-2 | use wee_events::{AggregateId, Command, CommandName, Entity, Handles, Revision, TypedService};
-  |                                        ^^^^^^^^^^^
-  |
-  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
 error[E0308]: mismatched types
-  --> tests/ui/unregistered_command.rs:72:34
+  --> tests/ui/unregistered_command.rs:71:34
    |
-72 |     let _ = service.execute(&id, Unsupported);
+71 |     let _ = service.execute(&id, Unsupported);
    |                     -------      ^^^^^^^^^^^ expected `Increment`, found `Unsupported`
    |                     |
    |                     arguments to this method are incorrect
    |
 help: the return type of this call is `Unsupported` due to the type of the argument passed
-  --> tests/ui/unregistered_command.rs:72:13
+  --> tests/ui/unregistered_command.rs:71:13
    |
-72 |     let _ = service.execute(&id, Unsupported);
+71 |     let _ = service.execute(&id, Unsupported);
    |             ^^^^^^^^^^^^^^^^^^^^^-----------^
    |                                  |
    |                                  this argument influences the return type of `execute`
 note: method defined here
   --> src/service.rs
    |
-   |     fn execute<C, Idx>(
+   |     fn execute<C>(
    |        ^^^^^^^

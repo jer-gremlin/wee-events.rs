@@ -171,16 +171,16 @@ impl TypedService<Counter> for TypedCounterService {
         }
     }
 
-    // The Handles<C, Idx> bound guarantees C is Increment at every valid call site,
+    // The Handles<C> bound guarantees C is Increment at every valid call site,
     // so we can safely downcast without a fallback branch.
-    fn execute<C, Idx>(
+    fn execute<C>(
         &self,
         id: &AggregateId,
         cmd: C,
     ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
     where
-        C: Command + serde::Serialize + Send + 'static,
-        Self: Handles<C, Idx>,
+        C: Command + Send + 'static,
+        Self: Handles<C>,
     {
         use std::any::Any;
         let id = id.clone();
