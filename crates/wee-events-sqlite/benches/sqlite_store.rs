@@ -501,13 +501,9 @@ wee_events::testing::store_bench_suite!(in_memory_global, {
 // Local filesystem benchmarks — all partition strategies
 // ===========================================================================
 
-wee_events::testing::store_bench_suite!(local_global, {
-    make_local_store(GlobalStrategy).await
-});
+wee_events::testing::store_bench_suite!(local_global, make_local_store(GlobalStrategy).await);
 
-wee_events::testing::store_bench_suite!(local_by_type, {
-    make_local_store(TypeStrategy).await
-});
+wee_events::testing::store_bench_suite!(local_by_type, make_local_store(TypeStrategy).await);
 
 wee_events::testing::store_bench_suite!(local_by_aggregate, {
     make_local_store(AggregateStrategy).await
