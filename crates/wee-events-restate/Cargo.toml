@@ -9,7 +9,7 @@ readme.workspace = true
 [dependencies]
 nanoid = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
-restate-sdk = "0.8"
+restate-sdk = "0.9"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
