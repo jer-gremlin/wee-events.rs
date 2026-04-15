@@ -1,4 +1,5 @@
-//! `restate_service!` macro — generates a typed Restate ingress client.
+//! `restate_service!` macro — generates a typed Restate ingress client and
+//! server-side dispatch helper.
 //!
 //! # Syntax
 //!
@@ -15,12 +16,20 @@
 //!
 //! # Generated items
 //!
+//! ## Client side (`CounterServiceClient`)
 //! - `pub struct CounterServiceClient` — typed Restate ingress client
 //! - `CounterServiceClient::new(ingress_url, service_name)` — constructor
 //! - `CounterServiceClient::load(&self, id) -> impl Future<..>`
 //! - `CounterServiceClient::execute<C, Idx>(&self, id, cmd) -> impl Future<..>`
 //!   (requires `Self: Handles<C, Idx>` — satisfied only for registered commands)
 //! - `impl Handles<Increment, ()> for CounterServiceClient` for each command
+//! - `impl TypedService<Counter> for CounterServiceClient`
+//!
+//! ## Server side (`CounterServiceServer`)
+//! - `pub struct CounterServiceServer` — zero-size server dispatch helper
+//! - `CounterServiceServer::dispatch_json(service, name, target, command)` — typed
+//!   JSON dispatch; deserializes the payload into each registered command type
+//!   and routes to the matching handler via `TypedService::execute`
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -37,6 +46,7 @@ use syn::{
 // ---------------------------------------------------------------------------
 
 syn::custom_keyword!(handlers);
+syn::custom_keyword!(loader);
 
 // ---------------------------------------------------------------------------
 // AST types
@@ -67,6 +77,8 @@ impl Parse for HandlerEntry {
 /// Full macro input:
 /// ```text
 /// pub ServiceName for StateType {
+///     // optional — used for server-side dispatch generation
+///     loader: load_fn,
 ///     handlers: [
 ///         CommandA => handler_a,
 ///         CommandB => handler_b,
@@ -77,6 +89,9 @@ struct RestateServiceInput {
     vis: Visibility,
     name: Ident,
     state_type: Path,
+    /// Optional loader function path for server-side dispatch generation.
+    #[allow(dead_code)]
+    loader_fn: Option<Path>,
     handler_entries: Vec<HandlerEntry>,
 }
 
@@ -89,6 +104,17 @@ impl Parse for RestateServiceInput {
 
         let body;
         braced!(body in input);
+
+        // Optional: loader: <path>,
+        let loader_fn = if body.peek(loader) {
+            let _loader_kw: loader = body.parse()?;
+            let _colon: Token![:] = body.parse()?;
+            let path: Path = body.parse()?;
+            let _ = body.parse::<Token![,]>();
+            Some(path)
+        } else {
+            None
+        };
 
         // handlers: [ ... ],
         let _handlers_kw: handlers = body.parse()?;
@@ -105,6 +131,7 @@ impl Parse for RestateServiceInput {
             vis,
             name,
             state_type,
+            loader_fn,
             handler_entries: entries.into_iter().collect(),
         })
     }
@@ -126,10 +153,14 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
         vis,
         name,
         state_type,
+        loader_fn: _loader_fn,
         handler_entries,
     } = service;
 
     let client_name = format_ident!("{}Client", name);
+    let server_name = format_ident!("{}Server", name);
+
+    let cmd_types: Vec<&Path> = handler_entries.iter().map(|e| &e.command_type).collect();
 
     // `impl Handles<Cmd, ()>` for each registered command.
     let handles_impls: Vec<TokenStream2> = handler_entries
@@ -141,6 +172,99 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
             }
         })
         .collect();
+
+    // TypedService impl — delegates to the inherent load/execute methods.
+    let typed_service_impl = quote! {
+        impl wee_events::TypedService<#state_type> for #client_name {
+            fn load(
+                &self,
+                id: &wee_events::AggregateId,
+            ) -> impl ::std::future::Future<
+                Output = wee_events::Result<wee_events::Entity<#state_type>>,
+            > + ::std::marker::Send + '_ {
+                #client_name::load(self, id)
+            }
+
+            fn execute<C, Idx>(
+                &self,
+                id: &wee_events::AggregateId,
+                cmd: C,
+            ) -> impl ::std::future::Future<
+                Output = wee_events::Result<wee_events::Entity<#state_type>>,
+            > + ::std::marker::Send + '_
+            where
+                C: wee_events::Command + ::serde::Serialize + ::std::marker::Send + 'static,
+                Self: wee_events::Handles<C, Idx>,
+            {
+                #client_name::execute(self, id, cmd)
+            }
+        }
+    };
+
+    // Server dispatch arms — each tries to deserialize into the command type,
+    // checks the command name at runtime, and routes to the typed handler.
+    // This is O(n) with n = number of registered commands, which is acceptable
+    // in practice (services rarely register more than ~10 commands).
+    let dispatch_arms: Vec<TokenStream2> = cmd_types
+        .iter()
+        .map(|cmd| {
+            quote! {
+                if let Ok(cmd) = ::serde_json::from_value::<#cmd>(command.clone()) {
+                    use wee_events::Command as _;
+                    if cmd.command_name().as_str() == name.as_str() {
+                        return service.execute(target, cmd).await;
+                    }
+                }
+            }
+        })
+        .collect();
+
+    // Server-side dispatch struct — a zero-size type that holds the generated
+    // dispatch logic. Separate from the client to make roles explicit.
+    let server_struct = quote! {
+        /// Generated server-side dispatch helper for #name.
+        ///
+        /// Provides `dispatch_json` which routes a JSON-encoded command payload to
+        /// the appropriate typed handler on a `TypedService` implementation.
+        /// This is the server-side complement to `#client_name`.
+        #vis struct #server_name;
+
+        impl #server_name {
+            /// Dispatch a JSON-encoded command to the appropriate typed handler.
+            ///
+            /// Iterates over registered command types in declaration order. For
+            /// each type, deserializes the payload and checks whether the
+            /// deserialized command's `command_name()` matches `name`. The first
+            /// match is dispatched via `TypedService::execute`.
+            ///
+            /// Returns `Error::Rejection` with code `"UNKNOWN_COMMAND"` when no
+            /// registered command type claims the given name.
+            ///
+            /// # Note on command types
+            ///
+            /// Each command type in the `handlers` list must implement
+            /// `serde::Deserialize` so the payload can be deserialized server-side.
+            #vis async fn dispatch_json<Svc>(
+                service: &Svc,
+                name: &wee_events::CommandName,
+                target: &wee_events::AggregateId,
+                command: ::serde_json::Value,
+            ) -> wee_events::Result<wee_events::Entity<#state_type>>
+            where
+                Svc: wee_events::TypedService<#state_type>
+                    #(+ wee_events::Handles<#cmd_types, ()>)*,
+            {
+                #(#dispatch_arms)*
+
+                Err(wee_events::Error::Rejection(
+                    wee_events::Rejection::new(
+                        "UNKNOWN_COMMAND",
+                        format!("unknown command: {}", name.as_str()),
+                    )
+                ))
+            }
+        }
+    };
 
     quote! {
         /// Generated typed Restate ingress client.
@@ -239,12 +363,8 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
 
         #(#handles_impls)*
 
-        // Note: `TypedService<S>` is not implemented for the generated client
-        // because `execute` requires `C: Serialize` for JSON serialization over
-        // the Restate ingress HTTP API, but `TypedService::execute` does not
-        // include that bound. The inherent `load`/`execute` methods provide the
-        // same compile-time `Handles<C>` safety. Functions accepting either a
-        // local service or a Restate client should use a custom trait or generic
-        // bound rather than `TypedService<S>`.
+        #typed_service_impl
+
+        #server_struct
     }
 }

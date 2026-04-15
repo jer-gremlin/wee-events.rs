@@ -141,7 +141,7 @@ async fn service_blanket_impl_works() {
 
 // ── Typed service tests ───────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct Increment {
     amount: i64,
 }
@@ -172,7 +172,7 @@ impl TypedService<Counter> for TypedCounterService {
     // so we can safely downcast without a fallback branch.
     fn execute<C, Idx>(&self, id: &AggregateId, cmd: C) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
     where
-        C: Command + Send + 'static,
+        C: Command + serde::Serialize + Send + 'static,
         Self: Handles<C, Idx>,
     {
         use std::any::Any;

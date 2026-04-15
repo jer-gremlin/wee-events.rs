@@ -113,6 +113,6 @@ pub trait TypedService<S>: Send + Sync {
         cmd: C,
     ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send
     where
-        C: crate::Command + Send + 'static,
+        C: crate::Command + serde::Serialize + Send + 'static,
         Self: Handles<C, Idx>;
 }
