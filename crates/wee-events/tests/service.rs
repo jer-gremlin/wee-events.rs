@@ -149,9 +149,7 @@ struct Increment {
 }
 
 impl Command for Increment {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("counter:increment")
-    }
+    const NAME: &'static str = "counter:increment";
 }
 
 struct TypedCounterService;

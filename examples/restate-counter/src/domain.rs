@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use wee_events::{
-    CommandName, Dispatcher, Entity, EventData, EventType, RawEvent, Rejection, Renderer,
+    Dispatcher, Entity, EventData, EventType, RawEvent, Rejection, Renderer,
 };
 
 use crate::random::HasRandomSource;
@@ -26,9 +26,7 @@ pub struct Increment {
 }
 
 impl wee_events::Command for Increment {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("increment")
-    }
+    const NAME: &'static str = "increment";
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -37,9 +35,7 @@ pub struct Decrement {
 }
 
 impl wee_events::Command for Decrement {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("decrement")
-    }
+    const NAME: &'static str = "decrement";
 }
 
 /// No payload — the adjustment is derived from the random source and balance.
@@ -47,9 +43,7 @@ impl wee_events::Command for Decrement {
 pub struct Adjust;
 
 impl wee_events::Command for Adjust {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("adjust")
-    }
+    const NAME: &'static str = "adjust";
 }
 
 // ---------------------------------------------------------------------------

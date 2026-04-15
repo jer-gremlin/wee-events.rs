@@ -8,18 +8,14 @@ struct Increment {
 }
 
 impl Command for Increment {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("counter:increment")
-    }
+    const NAME: &'static str = "counter:increment";
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct Unsupported;
 
 impl Command for Unsupported {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("counter:unsupported")
-    }
+    const NAME: &'static str = "counter:unsupported";
 }
 
 #[derive(Debug, Default, Clone)]
