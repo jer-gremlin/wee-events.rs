@@ -1,7 +1,7 @@
 use std::future::Future;
 use wee_events::{AggregateId, Command, Entity, Handles, Revision, TypedService};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct Increment {
     amount: i64,
 }
@@ -10,7 +10,7 @@ impl Command for Increment {
     const NAME: &'static str = "counter:increment";
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct Unsupported;
 
 impl Command for Unsupported {

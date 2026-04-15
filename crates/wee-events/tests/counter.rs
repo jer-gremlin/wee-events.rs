@@ -23,7 +23,7 @@ enum CounterEvent {
 // Domain commands
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Command)]
+#[derive(Debug, serde::Serialize, Command)]
 #[command(prefix = "counter")]
 enum CounterCommand {
     Increment { amount: i64 },
