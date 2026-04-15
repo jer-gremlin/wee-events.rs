@@ -129,7 +129,9 @@ async fn use_service(svc: &impl Service<Counter>) -> Entity<Counter> {
     let id: AggregateId = "counter:svc-1".parse().unwrap();
     let _ = svc.load(&id).await.unwrap();
     let name = CommandName::from("increment");
-    svc.execute(&name, &id, json!({"amount": 10})).await.unwrap()
+    svc.execute(&name, &id, json!({"amount": 10}))
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -157,7 +159,10 @@ struct TypedCounterService;
 impl Handles<Increment> for TypedCounterService {}
 
 impl TypedService<Counter> for TypedCounterService {
-    fn load(&self, id: &AggregateId) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send {
+    fn load(
+        &self,
+        id: &AggregateId,
+    ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send {
         let id = id.clone();
         async move {
             Ok(Entity {
@@ -170,7 +175,11 @@ impl TypedService<Counter> for TypedCounterService {
 
     // The Handles<C, Idx> bound guarantees C is Increment at every valid call site,
     // so we can safely downcast without a fallback branch.
-    fn execute<C, Idx>(&self, id: &AggregateId, cmd: C) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
+    fn execute<C, Idx>(
+        &self,
+        id: &AggregateId,
+        cmd: C,
+    ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
     where
         C: Command + serde::Serialize + Send + 'static,
         Self: Handles<C, Idx>,
@@ -179,7 +188,9 @@ impl TypedService<Counter> for TypedCounterService {
         let id = id.clone();
         async move {
             let cmd_any: Box<dyn Any> = Box::new(cmd);
-            let inc = cmd_any.downcast::<Increment>().expect("Handles<C> guarantees C is Increment");
+            let inc = cmd_any
+                .downcast::<Increment>()
+                .expect("Handles<C> guarantees C is Increment");
             Ok(Entity {
                 aggregate_id: id,
                 revision: Revision::zero(),

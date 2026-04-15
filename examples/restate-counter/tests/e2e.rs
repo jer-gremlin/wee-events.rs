@@ -228,5 +228,7 @@ async fn adjust_modifies_state_nondeterministically() {
 
     let body: EntityResponse = resp.json().await.unwrap();
     // Verify the response contains a valid integer value
-    body.state["value"].as_i64().expect("value should be a valid i64");
+    body.state["value"]
+        .as_i64()
+        .expect("value should be a valid i64");
 }

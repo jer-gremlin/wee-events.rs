@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use wee_events::{AggregateId, CommandName, Entity, Rejection};
 
 use crate::names;
-use crate::types::{CommandRequest, ExecuteRequest, EntityResponse, Metadata};
+use crate::types::{CommandRequest, EntityResponse, ExecuteRequest, Metadata};
 
 /// Restate-backed service client implementing `EntityLoader<S>` + `CommandExecutor<S>`
 /// by calling the executor workflow and loader service over the Restate ingress HTTP API.

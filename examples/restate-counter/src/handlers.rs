@@ -71,7 +71,12 @@ impl CounterExecutor for CounterCommands {
         let events = self
             .components
             .dispatcher
-            .dispatch(&handler_ctx, &entity, &req.command.name, req.command.command)
+            .dispatch(
+                &handler_ctx,
+                &entity,
+                &req.command.name,
+                req.command.command,
+            )
             .await
             .map_err(|r| {
                 let payload = serde_json::json!({

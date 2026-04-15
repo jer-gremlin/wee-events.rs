@@ -79,9 +79,7 @@ where
         match serde_json::from_value::<C>(command) {
             Err(e) => {
                 let msg = e.to_string();
-                Box::pin(async move {
-                    Err(Rejection::new("COMMAND_VALIDATION_ERROR", msg))
-                })
+                Box::pin(async move { Err(Rejection::new("COMMAND_VALIDATION_ERROR", msg)) })
             }
             Ok(cmd) => {
                 <&'a F as HandlerBridge<'a, Ctx, S, C>>::call(&self.handler, ctx, entity, cmd)

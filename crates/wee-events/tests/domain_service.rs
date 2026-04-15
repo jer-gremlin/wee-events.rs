@@ -1,9 +1,8 @@
 use serde::Deserialize;
 use serde_json::json;
 use wee_events::{
-    AggregateId, CommandExecutor, CommandName, Dispatcher, DomainService, Entity, EntityLoader,
-    EventData, EventType, RawEvent, Rejection, Renderer, Service,
-    memory::MemoryStore,
+    memory::MemoryStore, AggregateId, CommandExecutor, CommandName, Dispatcher, DomainService,
+    Entity, EntityLoader, EventData, EventType, RawEvent, Rejection, Renderer, Service,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -126,7 +125,11 @@ async fn handler_rejection_propagates() {
     let id: AggregateId = "counter:test".parse().unwrap();
 
     let err = svc
-        .execute(&CommandName::from("decrement"), &id, json!({ "amount": 100 }))
+        .execute(
+            &CommandName::from("decrement"),
+            &id,
+            json!({ "amount": 100 }),
+        )
         .await
         .unwrap_err();
 

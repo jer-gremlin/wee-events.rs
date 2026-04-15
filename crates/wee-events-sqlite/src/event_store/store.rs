@@ -12,8 +12,8 @@ use tokio::time::sleep;
 use ulid::{Generator, Ulid};
 use wee_events::{
     Aggregate, AggregateId, AggregateType, ChangeSet, CorrelationId, EventData, EventId,
-    EventMetadata, EventStore as EventStoreApi, PublishOptions, RawEvent, RecordedEvent, Revision,
-    RetryDiagnostics,
+    EventMetadata, EventStore as EventStoreApi, PublishOptions, RawEvent, RecordedEvent,
+    RetryDiagnostics, Revision,
 };
 
 use crate::{database, Error};
@@ -393,11 +393,7 @@ where
         }
 
         let can_auto_retry = options.expected_revision.is_none();
-        let max_attempts = if can_auto_retry {
-            MAX_AUTO_RETRIES
-        } else {
-            1
-        };
+        let max_attempts = if can_auto_retry { MAX_AUTO_RETRIES } else { 1 };
 
         let mut last_conflict = None;
         for attempt in 0..max_attempts {
@@ -406,9 +402,7 @@ where
                 .await
             {
                 Ok(changeset) => return Ok(changeset),
-                Err(PublishAttemptError::Conflict(conflict))
-                    if can_auto_retry =>
-                {
+                Err(PublishAttemptError::Conflict(conflict)) if can_auto_retry => {
                     last_conflict = Some(RetryDiagnostics {
                         last_attempted_revision: conflict.attempted_revision.clone(),
                         observed_max_revision: conflict.actual.clone(),
