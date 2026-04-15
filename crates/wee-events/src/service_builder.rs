@@ -90,17 +90,6 @@ pub type ErasedLoader<S> = Box<
         + Sync,
 >;
 
-/// A type-erased command handler that takes an `Arc`-wrapped context, owned entity,
-/// and boxed command.
-pub type ErasedHandler<S> = Box<
-    dyn Fn(
-            std::sync::Arc<dyn std::any::Any + Send + Sync>,
-            Entity<S>,
-            Box<dyn std::any::Any + Send + 'static>,
-        ) -> BoxFuture<'static, crate::Result<Entity<S>>>
-        + Send
-        + Sync,
->;
 
 /// Wraps a typed async factory into an `ErasedFactory`.
 ///
@@ -152,6 +141,21 @@ where
         },
     )
 }
+
+/// A type-erased command handler that takes an `Arc`-wrapped context, owned entity,
+/// and boxed command.
+///
+/// Used by macro-generated services to store per-command handlers without the
+/// command type `C` in the field type.
+pub type ErasedHandler<S> = Box<
+    dyn Fn(
+            std::sync::Arc<dyn std::any::Any + Send + Sync>,
+            Entity<S>,
+            Box<dyn std::any::Any + Send + 'static>,
+        ) -> BoxFuture<'static, crate::Result<Entity<S>>>
+        + Send
+        + Sync,
+>;
 
 /// Wraps a typed async handler function into an `ErasedHandler`.
 ///
