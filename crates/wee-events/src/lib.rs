@@ -9,6 +9,7 @@ mod id;
 mod memory_store;
 mod renderer;
 mod service;
+mod service_builder;
 mod store;
 
 #[cfg(any(test, feature = "testing"))]
@@ -29,6 +30,7 @@ pub use id::{
 };
 pub use renderer::{ReduceFn, Renderer};
 pub use service::{CommandExecutor, EntityLoader, Handles, Rejection, Service, TypedService};
+pub use service_builder::{BuiltService, Factory, ServiceBuilder};
 pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{Command, DomainEvent};
 
