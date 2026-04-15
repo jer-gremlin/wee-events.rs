@@ -31,15 +31,11 @@ struct Decrement {
 }
 
 impl wee_events::Command for Increment {
-    fn command_name(&self) -> wee_events::CommandName {
-        wee_events::CommandName::new("counter:increment")
-    }
+    const NAME: &'static str = "counter:increment";
 }
 
 impl wee_events::Command for Decrement {
-    fn command_name(&self) -> wee_events::CommandName {
-        wee_events::CommandName::new("counter:decrement")
-    }
+    const NAME: &'static str = "counter:decrement";
 }
 
 // ---------------------------------------------------------------------------

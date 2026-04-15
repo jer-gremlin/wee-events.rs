@@ -8,7 +8,7 @@
 //!
 //! No HTTP calls are made — there is no Restate server running during tests.
 
-use wee_events::{AggregateId, Command, CommandName};
+use wee_events::{AggregateId, Command};
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -26,18 +26,14 @@ struct Increment {
 }
 
 impl Command for Increment {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("counter:increment")
-    }
+    const NAME: &'static str = "counter:increment";
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Adjust;
 
 impl Command for Adjust {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("counter:adjust")
-    }
+    const NAME: &'static str = "counter:adjust";
 }
 
 // ---------------------------------------------------------------------------

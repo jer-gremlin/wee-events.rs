@@ -201,19 +201,16 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
         }
     };
 
-    // Server dispatch arms — each tries to deserialize into the command type,
-    // checks the command name at runtime, and routes to the typed handler.
-    // This is O(n) with n = number of registered commands, which is acceptable
-    // in practice (services rarely register more than ~10 commands).
+    // Server dispatch arms — check name first via the type-level `Command::NAME`
+    // constant, then deserialize only the matching type. This matches the spec's
+    // intent: discriminate by name, decode only the selected payload.
     let dispatch_arms: Vec<TokenStream2> = cmd_types
         .iter()
         .map(|cmd| {
             quote! {
-                if let Ok(cmd) = ::serde_json::from_value::<#cmd>(command.clone()) {
-                    use wee_events::Command as _;
-                    if cmd.command_name().as_str() == name.as_str() {
-                        return service.execute(target, cmd).await;
-                    }
+                if name.as_str() == <#cmd as wee_events::Command>::NAME {
+                    let cmd: #cmd = ::serde_json::from_value(command)?;
+                    return service.execute(target, cmd).await;
                 }
             }
         })
@@ -232,10 +229,10 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
         impl #server_name {
             /// Dispatch a JSON-encoded command to the appropriate typed handler.
             ///
-            /// Iterates over registered command types in declaration order. For
-            /// each type, deserializes the payload and checks whether the
-            /// deserialized command's `command_name()` matches `name`. The first
-            /// match is dispatched via `TypedService::execute`.
+            /// Checks the command name against each registered type's
+            /// `Command::NAME` constant, then deserializes only the matching
+            /// payload type. This is static name-first dispatch — no
+            /// speculative deserialization.
             ///
             /// Returns `Error::Rejection` with code `"UNKNOWN_COMMAND"` when no
             /// registered command type claims the given name.

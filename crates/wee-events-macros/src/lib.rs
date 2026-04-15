@@ -47,8 +47,11 @@ pub fn derive_command(input: TokenStream) -> TokenStream {
         }
     });
 
+    // For enums, NAME is the prefix — per-variant dispatch uses command_name(&self).
     let expanded = quote! {
         impl wee_events::Command for #name {
+            const NAME: &'static str = #prefix;
+
             fn command_name(&self) -> wee_events::CommandName {
                 match self {
                     #(#arms)*

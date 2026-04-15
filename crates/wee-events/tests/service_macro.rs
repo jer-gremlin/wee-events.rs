@@ -1,4 +1,4 @@
-use wee_events::{AggregateId, Command, CommandName, Entity, Handles, Revision, TypedService};
+use wee_events::{AggregateId, Command, Entity, Handles, Revision, TypedService};
 
 #[derive(Debug, Default, Clone)]
 struct Counter {
@@ -11,18 +11,14 @@ struct Increment {
 }
 
 impl Command for Increment {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("counter:increment")
-    }
+    const NAME: &'static str = "counter:increment";
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 struct Adjust;
 
 impl Command for Adjust {
-    fn command_name(&self) -> CommandName {
-        CommandName::from("counter:adjust")
-    }
+    const NAME: &'static str = "counter:adjust";
 }
 
 #[derive(Default, Clone)]
