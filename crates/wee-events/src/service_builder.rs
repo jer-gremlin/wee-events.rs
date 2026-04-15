@@ -53,6 +53,141 @@ use crate::Command;
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 // ---------------------------------------------------------------------------
+// Fully-erased types for macro-generated services
+//
+// Macro-generated services need a struct with no `Ctx` type parameter so that
+// `build` can be a normal method that constrains `Ctx` via inference from the
+// factory/loader/handler arguments.
+//
+// Both the context AND each command type are fully erased using `dyn Any`.
+// The concrete context is produced by the factory as a `Box<dyn Any + Send>`.
+// The loader and handlers downcast the context back to their concrete `Ctx`.
+//
+// This design adds a small allocation + dynamic dispatch overhead in exchange
+// for a clean, simple struct type with no unnameable generic parameters.
+// ---------------------------------------------------------------------------
+
+/// A factory that produces a reference-counted, fully type-erased context.
+///
+/// Using `Arc` allows the context to be cheaply shared between the loader
+/// and handler within a single `execute` call without requiring `Ctx: Clone`.
+pub type ErasedFactory = Box<
+    dyn Fn() -> BoxFuture<'static, crate::Result<std::sync::Arc<dyn std::any::Any + Send + Sync>>>
+        + Send
+        + Sync,
+>;
+
+/// A type-erased loader that takes an `Arc`-wrapped context and an owned `AggregateId`.
+///
+/// Using `Arc` for the context and owned `AggregateId` lets the returned
+/// `BoxFuture<'static, ...>` own all its data, avoiding unsatisfiable lifetime
+/// constraints on the erased closure.
+pub type ErasedLoader<S> = Box<
+    dyn Fn(
+            std::sync::Arc<dyn std::any::Any + Send + Sync>,
+            AggregateId,
+        ) -> BoxFuture<'static, crate::Result<Entity<S>>>
+        + Send
+        + Sync,
+>;
+
+/// A type-erased command handler that takes an `Arc`-wrapped context, owned entity,
+/// and boxed command.
+pub type ErasedHandler<S> = Box<
+    dyn Fn(
+            std::sync::Arc<dyn std::any::Any + Send + Sync>,
+            Entity<S>,
+            Box<dyn std::any::Any + Send + 'static>,
+        ) -> BoxFuture<'static, crate::Result<Entity<S>>>
+        + Send
+        + Sync,
+>;
+
+/// Wraps a typed async factory into an `ErasedFactory`.
+///
+/// The produced context is wrapped in `Arc<dyn Any + Send + Sync>` so it can
+/// be cheaply shared between the loader and handler within a single `execute`.
+pub fn erase_factory<Ctx, F, Fut>(factory: F) -> ErasedFactory
+where
+    Ctx: std::any::Any + Send + Sync + 'static,
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = crate::Result<Ctx>> + Send + 'static,
+{
+    use std::sync::Arc;
+    Box::new(move || {
+        let fut = factory();
+        Box::pin(async move {
+            let ctx: Ctx = fut.await?;
+            let arc: Arc<dyn std::any::Any + Send + Sync> = Arc::new(ctx);
+            Ok(arc)
+        })
+    })
+}
+
+/// Wraps a typed async loader function into an `ErasedLoader`.
+///
+/// Takes an `Arc`-wrapped erased context and an owned `AggregateId`. Inside
+/// an `async move` block (which owns all data), uses `LoaderBridge` to invoke
+/// the loader and await the result. The returned future is `'static` because
+/// it owns all the data it references.
+///
+/// Panics if the context type does not match `Ctx` — that would be a bug.
+pub fn erase_loader<Ctx, S, F>(loader: F) -> ErasedLoader<S>
+where
+    Ctx: std::any::Any + Send + Sync + 'static,
+    S: Send + Sync + 'static,
+    F: Send + Sync + 'static,
+    for<'a> &'a F: LoaderBridge<'a, Ctx, S>,
+{
+    use std::sync::Arc;
+    let loader = Arc::new(loader);
+    Box::new(
+        move |ctx_arc: Arc<dyn std::any::Any + Send + Sync>, id: AggregateId| {
+            let ctx: Arc<Ctx> = ctx_arc
+                .downcast::<Ctx>()
+                .expect("erase_loader: context type mismatch (this is a bug)");
+            let loader = Arc::clone(&loader);
+            Box::pin(async move {
+                <&F as LoaderBridge<'_, Ctx, S>>::call(&*loader, &*ctx, &id).await
+            })
+        },
+    )
+}
+
+/// Wraps a typed async handler function into an `ErasedHandler`.
+///
+/// Uses `HandlerBridge` inside an `async move` block for the same reasons as
+/// `erase_loader`. All data is owned by the async block, making the future
+/// `'static`. Panics on type mismatch.
+pub fn erase_handler<Ctx, S, C, F>(handler: F) -> ErasedHandler<S>
+where
+    Ctx: std::any::Any + Send + Sync + 'static,
+    S: Send + Sync + 'static,
+    C: std::any::Any + Send + 'static,
+    F: Send + Sync + 'static,
+    for<'a> &'a F: HandlerBridge<'a, Ctx, S, C>,
+{
+    use std::sync::Arc;
+    let handler = Arc::new(handler);
+    Box::new(
+        move |ctx_arc: Arc<dyn std::any::Any + Send + Sync>,
+              entity: Entity<S>,
+              cmd_any: Box<dyn std::any::Any + Send + 'static>| {
+            let ctx: Arc<Ctx> = ctx_arc
+                .downcast::<Ctx>()
+                .expect("erase_handler: context type mismatch (this is a bug)");
+            let cmd = *cmd_any
+                .downcast::<C>()
+                .expect("erase_handler: command type mismatch (this is a bug)");
+            let handler = Arc::clone(&handler);
+            Box::pin(async move {
+                <&F as HandlerBridge<'_, Ctx, S, C>>::call(&*handler, &*ctx, &entity, cmd).await
+            })
+        },
+    )
+}
+
+// ---------------------------------------------------------------------------
 // HandlerBridge — lifetime-polymorphic glue.
 //
 // Rust cannot express `F: for<'a> Fn(&'a Ctx, ...) -> Fut<'a>` where `Fut`
@@ -60,7 +195,8 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 // returned future can borrow `ctx` and `entity` for exactly `'a`.
 // ---------------------------------------------------------------------------
 
-trait HandlerBridge<'a, Ctx: 'a, S: 'a, C>: Sized {
+#[doc(hidden)]
+pub trait HandlerBridge<'a, Ctx: 'a, S: 'a, C>: Sized {
     fn call(
         f: Self,
         ctx: &'a Ctx,
@@ -90,7 +226,8 @@ where
 // LoaderBridge — same lifetime trick for the loader function.
 // ---------------------------------------------------------------------------
 
-trait LoaderBridge<'a, Ctx: 'a, S: 'a>: Sized {
+#[doc(hidden)]
+pub trait LoaderBridge<'a, Ctx: 'a, S: 'a>: Sized {
     fn call(
         f: Self,
         ctx: &'a Ctx,
@@ -159,7 +296,8 @@ pub struct There<Idx>(PhantomData<Idx>);
 ///
 /// `Idx` is a phantom position selector inferred by the compiler; callers
 /// never need to specify it.
-pub(crate) trait HandleCommand<C, Idx, Ctx, S> {
+#[doc(hidden)]
+pub trait HandleCommand<C, Idx, Ctx, S> {
     fn handle<'a>(
         &'a self,
         ctx: &'a Ctx,

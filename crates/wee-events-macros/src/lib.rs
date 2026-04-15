@@ -1,3 +1,5 @@
+mod service_macro;
+
 use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
 use quote::quote;
@@ -162,6 +164,37 @@ fn extract_prefix(input: &DeriveInput, attr_name: &str) -> syn::Result<String> {
         .strip_suffix(&format!("-{attr_name}"))
         .unwrap_or(&raw)
         .to_string())
+}
+
+/// Generates a service struct with a `build(factory)` method that wires up
+/// `ServiceBuilder` and produces a type-safe service for the given aggregate.
+///
+/// # Syntax
+///
+/// ```rust,ignore
+/// wee_events::service! {
+///     pub CounterService for Counter {
+///         loader: load_counter,
+///         handlers: [
+///             Increment => increment,
+///             Adjust    => adjust,
+///         ],
+///     }
+/// }
+/// ```
+///
+/// # Generated items
+///
+/// - `pub struct CounterService` — fully type-erased service struct (no generic parameters)
+/// - `CounterService::build(factory) -> CounterService` — constructor
+/// - `CounterService::load(&self, id) -> impl Future<..>`
+/// - `CounterService::execute<C, Idx>(&self, id, cmd) -> impl Future<..>`
+///   (requires `Self: Handles<C, Idx>` — satisfied by the registered commands)
+/// - `impl Handles<Increment, ()> for CounterService` for each command
+/// - `impl TypedService<Counter> for CounterService`
+#[proc_macro]
+pub fn service(input: TokenStream) -> TokenStream {
+    service_macro::expand(input)
 }
 
 struct PrefixArgs {
