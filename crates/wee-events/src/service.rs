@@ -79,17 +79,50 @@ pub trait CommandExecutor<S>: Send + Sync {
 pub trait Service<S>: EntityLoader<S> + CommandExecutor<S> {}
 impl<S, T: EntityLoader<S> + CommandExecutor<S>> Service<S> for T {}
 
-/// Marker trait that declares a service can handle command type `C`.
+/// Hidden implementation details used by generated code.
+#[doc(hidden)]
+pub mod __private {
+    use super::*;
+    use core::future::Future;
+
+    /// Phantom marker trait that associates a service with its state type `S`.
+    ///
+    /// Using `S` as a type parameter (not an associated type) avoids `E0446`
+    /// ("private type in public interface") when the state type is private in
+    /// user code. The impl `impl ServiceState<PrivateState> for PubService {}` is
+    /// always valid regardless of `PrivateState`'s visibility.
+    pub trait ServiceState<S>: Send + Sync {}
+
+    /// Carries the compile-time dispatch witness for command `C` with state `S`.
+    ///
+    /// Implemented per concrete command by the `service!` macro with the
+    /// specific `Idx` type computed from the handler registration order.
+    /// The `Handles<C, S>: DispatchCommand<C, S>` supertrait relationship means
+    /// the compiler can call this when `Self: Handles<C, S>`.
+    pub trait DispatchCommand<C, S>: ServiceState<S> + Send + Sync {
+        fn dispatch_command(
+            &self,
+            id: &AggregateId,
+            cmd: C,
+        ) -> impl Future<Output = crate::Result<Entity<S>>> + Send;
+    }
+}
+
+/// Marker supertrait declaring that a service can handle command type `C`
+/// for state type `S`.
 ///
-/// Implement this for each command type your service supports. The
-/// `TypedService::execute` method requires `Self: Handles<C>` so the
-/// compiler rejects calls with unregistered command types at compile time.
-pub trait Handles<C> {}
+/// The `__private::DispatchCommand<C, S>` supertrait carries the actual
+/// dispatch implementation. Callers only see `Handles<C, S>`; the dispatch
+/// details are hidden.
+///
+/// Implement via `service!` macro (which generates the concrete `DispatchCommand`
+/// impl) or manually by implementing both `DispatchCommand<C, S>` and `Handles<C, S>`.
+pub trait Handles<C, S>: __private::DispatchCommand<C, S> {}
 
 /// A typed service contract combining state loading with type-safe command dispatch.
 ///
 /// Unlike `Service<S>` (which takes untyped JSON), `TypedService<S>` dispatches
-/// over concrete command types. The `Handles<C>` bound on `execute` ensures
+/// over concrete command types. The `Handles<C, S>` bound on `execute` ensures
 /// only registered commands can be dispatched — unregistered commands produce a
 /// compile error rather than a runtime rejection.
 ///
@@ -109,5 +142,8 @@ pub trait TypedService<S>: Send + Sync {
     ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send
     where
         C: crate::Command + Send + 'static,
-        Self: Handles<C>;
+        Self: Handles<C, S>,
+    {
+        __private::DispatchCommand::<C, S>::dispatch_command(self, id, cmd)
+    }
 }

@@ -30,12 +30,15 @@ pub use id::{
 };
 pub use renderer::{ReduceFn, Renderer};
 pub use service::{CommandExecutor, EntityLoader, Handles, Rejection, Service, TypedService};
+pub use service_builder::{BuiltService, ServiceBuilder};
+#[doc(hidden)]
 pub use service_builder::{
-    erase_factory, erase_handler, erase_loader, BuiltService, ErasedFactory, ErasedHandler,
-    ErasedLoader, Factory, ServiceBuilder,
+    FactoryBridge, HandleCommand, HandlerBridge, HandlerList, LoaderBridge,
 };
 #[doc(hidden)]
-pub use service_builder::{HandleCommand, HandlerBridge, HandlerList, LoaderBridge};
+pub use service_builder::{EmptyHandlers, Here, There};
+#[doc(hidden)]
+pub use service::__private;
 pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{service, Command, DomainEvent};
 

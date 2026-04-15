@@ -24,7 +24,28 @@ struct Counter {
 
 struct TestService;
 
-impl Handles<Increment> for TestService {}
+// Implement ServiceState<Counter> — phantom marker
+impl wee_events::__private::ServiceState<Counter> for TestService {}
+
+// Implement DispatchCommand<Increment, Counter> — required by Handles<Increment, Counter>
+impl wee_events::__private::DispatchCommand<Increment, Counter> for TestService {
+    fn dispatch_command(
+        &self,
+        id: &AggregateId,
+        _cmd: Increment,
+    ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send {
+        let id = id.clone();
+        async move {
+            Ok(Entity {
+                aggregate_id: id,
+                revision: Revision::zero(),
+                state: Counter { value: 0 },
+            })
+        }
+    }
+}
+
+impl Handles<Increment, Counter> for TestService {}
 
 impl TypedService<Counter> for TestService {
     fn load(
@@ -40,31 +61,13 @@ impl TypedService<Counter> for TestService {
             })
         }
     }
-
-    fn execute<C>(
-        &self,
-        id: &AggregateId,
-        _cmd: C,
-    ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
-    where
-        C: Command + Send + 'static,
-        Self: Handles<C>,
-    {
-        let id = id.clone();
-        async move {
-            Ok(Entity {
-                aggregate_id: id,
-                revision: Revision::zero(),
-                state: Counter { value: 0 },
-            })
-        }
-    }
+    // execute uses default impl from TypedService
 }
 
 fn main() {
     let service = TestService;
     let id: AggregateId = "counter:c1".parse().unwrap();
-    // This should fail — TestService does not implement Handles<Unsupported>.
+    // This should fail — TestService does not implement Handles<Unsupported, Counter>.
     // Note: the compiler diagnostic says "mismatched types" (Increment vs Unsupported)
     // rather than "missing Handles impl" — this is a known RPIT inference artifact
     // where the compiler infers C from the only Handles impl, then rejects the mismatch.

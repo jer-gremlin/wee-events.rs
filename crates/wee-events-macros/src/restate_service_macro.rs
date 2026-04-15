@@ -162,20 +162,51 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
 
     let cmd_types: Vec<&Path> = handler_entries.iter().map(|e| &e.command_type).collect();
 
-    // `impl Handles<Cmd, ()>` for each registered command.
+    // ServiceState<S> impl — phantom marker, avoids E0446 when state_type
+    // is a private type in user code.
+    let service_state_impl = quote! {
+        impl wee_events::__private::ServiceState<#state_type> for #client_name {}
+    };
+
+    // Per-command DispatchCommand<C, S> impls — required by Handles<C, S> supertrait.
+    // The dispatch logic serializes and sends to the Restate ingress HTTP API.
+    let dispatch_command_impls: Vec<TokenStream2> = handler_entries
+        .iter()
+        .map(|entry| {
+            let cmd = &entry.command_type;
+            quote! {
+                impl wee_events::__private::DispatchCommand<#cmd, #state_type> for #client_name {
+                    fn dispatch_command(
+                        &self,
+                        id: &wee_events::AggregateId,
+                        cmd: #cmd,
+                    ) -> impl ::std::future::Future<
+                        Output = wee_events::Result<wee_events::Entity<#state_type>>,
+                    > + ::std::marker::Send + '_ {
+                        // Delegate to the inherent execute method which handles
+                        // serialization and the HTTP call.
+                        #client_name::execute(self, id, cmd)
+                    }
+                }
+            }
+        })
+        .collect();
+
+    // `impl Handles<Cmd, State>` for each registered command.
+    // The DispatchCommand<C, S> supertrait is satisfied by the impl above.
     let handles_impls: Vec<TokenStream2> = handler_entries
         .iter()
         .map(|entry| {
             let cmd = &entry.command_type;
             quote! {
-                impl wee_events::Handles<#cmd> for #client_name {}
+                impl wee_events::Handles<#cmd, #state_type> for #client_name {}
             }
         })
         .collect();
 
-    // TypedService impl — delegates directly to the inherent methods.
-    // `C: Command` implies `C: Serialize` (supertrait), so the impl can
-    // serialize without extra bounds, TypeId, or Any.
+    // TypedService impl — delegates load to the inherent method.
+    // The execute method uses the default impl from TypedService which calls
+    // DispatchCommand<C, S>::dispatch_command.
     let typed_service_impl = quote! {
         impl wee_events::TypedService<#state_type> for #client_name {
             fn load(
@@ -186,21 +217,7 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
             > + ::std::marker::Send + '_ {
                 #client_name::load(self, id)
             }
-
-            fn execute<C>(
-                &self,
-                id: &wee_events::AggregateId,
-                cmd: C,
-            ) -> impl ::std::future::Future<
-                Output = wee_events::Result<wee_events::Entity<#state_type>>,
-            > + ::std::marker::Send + '_
-            where
-                C: wee_events::Command + ::std::marker::Send + 'static,
-                Self: wee_events::Handles<C>,
-            {
-                // Command: Serialize is a supertrait, so we can serialize directly
-                #client_name::execute(self, id, cmd)
-            }
+            // execute uses the default impl from TypedService which calls DispatchCommand<C, S>
         }
     };
 
@@ -252,7 +269,7 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
             ) -> wee_events::Result<wee_events::Entity<#state_type>>
             where
                 Svc: wee_events::TypedService<#state_type>
-                    #(+ wee_events::Handles<#cmd_types>)*,
+                    #(+ wee_events::Handles<#cmd_types, #state_type>)*,
             {
                 #(#dispatch_arms)*
 
@@ -331,7 +348,7 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
             > + ::std::marker::Send + '_
             where
                 C: wee_events::Command + ::std::marker::Send + 'static,
-                Self: wee_events::Handles<C>,
+                Self: wee_events::Handles<C, #state_type>,
             {
                 let id = id.clone();
                 let ingress_url = self.ingress_url.clone();
@@ -357,6 +374,10 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
                 }
             }
         }
+
+        #service_state_impl
+
+        #(#dispatch_command_impls)*
 
         #(#handles_impls)*
 
