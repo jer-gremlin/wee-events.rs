@@ -23,6 +23,7 @@ wee-events-macros = { path = "../wee-events-macros" }
 [dev-dependencies]
 wee-events = { path = ".", features = ["testing"] }
 tokio = { workspace = true }
+trybuild = "1"
 
 [[bench]]
 name = "memory_store"

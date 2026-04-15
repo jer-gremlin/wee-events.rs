@@ -1,6 +1,9 @@
+use std::future::Future;
+
 use serde_json::json;
 use wee_events::{
-    AggregateId, CommandExecutor, CommandName, Entity, EntityLoader, Rejection, Revision, Service,
+    AggregateId, Command, CommandExecutor, CommandName, Entity, EntityLoader, Handles, Rejection,
+    Revision, Service, TypedService,
 };
 
 #[test]
@@ -134,4 +137,70 @@ async fn service_blanket_impl_works() {
     let svc = CounterService;
     let entity = use_service(&svc).await;
     assert_eq!(entity.state.value, 10);
+}
+
+// ── Typed service tests ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+struct Increment {
+    amount: i64,
+}
+
+impl Command for Increment {
+    fn command_name(&self) -> CommandName {
+        CommandName::from("counter:increment")
+    }
+}
+
+struct TypedCounterService;
+
+impl Handles<Increment> for TypedCounterService {}
+
+impl TypedService<Counter> for TypedCounterService {
+    fn load(&self, id: &AggregateId) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send {
+        let id = id.clone();
+        async move {
+            Ok(Entity {
+                aggregate_id: id,
+                revision: Revision::zero(),
+                state: Counter { value: 0 },
+            })
+        }
+    }
+
+    // The Handles<C> bound guarantees C is Increment at every valid call site,
+    // so we can safely downcast without a fallback branch.
+    fn execute<C>(&self, id: &AggregateId, cmd: C) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
+    where
+        C: Command + Send + 'static,
+        Self: Handles<C>,
+    {
+        use std::any::Any;
+        let id = id.clone();
+        async move {
+            let cmd_any: Box<dyn Any> = Box::new(cmd);
+            let inc = cmd_any.downcast::<Increment>().expect("Handles<C> guarantees C is Increment");
+            Ok(Entity {
+                aggregate_id: id,
+                revision: Revision::zero(),
+                state: Counter { value: inc.amount },
+            })
+        }
+    }
+}
+
+#[tokio::test]
+async fn typed_service_loads_state() {
+    let svc = TypedCounterService;
+    let id: AggregateId = "counter:test-1".parse().unwrap();
+    let entity = svc.load(&id).await.unwrap();
+    assert_eq!(entity.state.value, 0);
+}
+
+#[tokio::test]
+async fn typed_service_executes_registered_command() {
+    let svc = TypedCounterService;
+    let id: AggregateId = "counter:test-1".parse().unwrap();
+    let entity = svc.execute(&id, Increment { amount: 5 }).await.unwrap();
+    assert_eq!(entity.state.value, 5);
 }

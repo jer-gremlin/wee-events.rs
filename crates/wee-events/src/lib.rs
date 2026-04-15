@@ -28,7 +28,7 @@ pub use id::{
     EventType, Revision,
 };
 pub use renderer::{ReduceFn, Renderer};
-pub use service::{CommandExecutor, EntityLoader, Rejection, Service};
+pub use service::{CommandExecutor, EntityLoader, Handles, Rejection, Service, TypedService};
 pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{Command, DomainEvent};
 
