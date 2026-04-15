@@ -173,24 +173,9 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
         })
         .collect();
 
-    // Serializer entries for the dispatch map — one per registered command type.
-    let serializer_entries: Vec<TokenStream2> = cmd_types
-        .iter()
-        .map(|cmd| {
-            quote! {
-                map.insert(
-                    ::std::any::TypeId::of::<#cmd>(),
-                    (|boxed: ::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send>| {
-                        let cmd = *boxed.downcast::<#cmd>().expect("TypeId matched");
-                        ::serde_json::to_value(cmd)
-                    }) as fn(::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send>) -> ::serde_json::Result<::serde_json::Value>,
-                );
-            }
-        })
-        .collect();
-
-    // TypedService impl — `load` delegates to inherent; `execute` uses the erased
-    // serializer map so no `C: Serialize` bound is needed at the trait-impl level.
+    // TypedService impl — delegates directly to the inherent methods.
+    // `C: Command` implies `C: Serialize` (supertrait), so the impl can
+    // serialize without extra bounds, TypeId, or Any.
     let typed_service_impl = quote! {
         impl wee_events::TypedService<#state_type> for #client_name {
             fn load(
@@ -213,30 +198,8 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
                 C: wee_events::Command + ::std::marker::Send + 'static,
                 Self: wee_events::Handles<C>,
             {
-                let id = id.clone();
-                let ingress_url = self.ingress_url.clone();
-                let service_name = self.service_name.clone();
-                let http = self.http.clone();
-                let name = cmd.command_name();
-                let type_id = ::std::any::TypeId::of::<C>();
-                let cmd_any: ::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send> =
-                    ::std::boxed::Box::new(cmd);
-                let serialize = *self.serializers.get(&type_id).expect(
-                    "Handles<C> is only impl'd for registered commands — serializer must exist",
-                );
-                let command_result = serialize(cmd_any).map_err(wee_events::Error::Serialization);
-                async move {
-                    let command = command_result?;
-                    wee_events_restate::generated::execute::<#state_type>(
-                        &http,
-                        &ingress_url,
-                        &service_name,
-                        id,
-                        name,
-                        command,
-                    )
-                    .await
-                }
+                // Command: Serialize is a supertrait, so we can serialize directly
+                #client_name::execute(self, id, cmd)
             }
         }
     };
@@ -317,14 +280,6 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
             http: ::reqwest::Client,
             ingress_url: ::std::string::String,
             service_name: ::std::string::String,
-            /// Erased serializers keyed by command TypeId. Populated in `new`
-            /// for every registered command type. Used by `TypedService::execute`
-            /// to avoid requiring `C: Serialize` at the trait-method level.
-            serializers: ::std::collections::HashMap<
-                ::std::any::TypeId,
-                fn(::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send>)
-                    -> ::serde_json::Result<::serde_json::Value>,
-            >,
         }
 
         impl #client_name {
@@ -334,17 +289,10 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
                 ingress_url: impl ::std::convert::Into<::std::string::String>,
                 service_name: impl ::std::convert::Into<::std::string::String>,
             ) -> Self {
-                let mut map: ::std::collections::HashMap<
-                    ::std::any::TypeId,
-                    fn(::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send>)
-                        -> ::serde_json::Result<::serde_json::Value>,
-                > = ::std::collections::HashMap::new();
-                #(#serializer_entries)*
                 Self {
                     http: ::reqwest::Client::new(),
                     ingress_url: ingress_url.into(),
                     service_name: service_name.into(),
-                    serializers: map,
                 }
             }
 
@@ -382,10 +330,7 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
                 Output = wee_events::Result<wee_events::Entity<#state_type>>,
             > + ::std::marker::Send + '_
             where
-                C: wee_events::Command
-                    + ::serde::Serialize
-                    + ::std::marker::Send
-                    + 'static,
+                C: wee_events::Command + ::std::marker::Send + 'static,
                 Self: wee_events::Handles<C>,
             {
                 let id = id.clone();
