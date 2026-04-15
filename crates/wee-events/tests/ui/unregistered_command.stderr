@@ -1,0 +1,20 @@
+error[E0308]: mismatched types
+  --> tests/ui/unregistered_command.rs:75:34
+   |
+75 |     let _ = service.execute(&id, Unsupported);
+   |                     -------      ^^^^^^^^^^^ expected `Increment`, found `Unsupported`
+   |                     |
+   |                     arguments to this method are incorrect
+   |
+help: the return type of this call is `Unsupported` due to the type of the argument passed
+  --> tests/ui/unregistered_command.rs:75:13
+   |
+75 |     let _ = service.execute(&id, Unsupported);
+   |             ^^^^^^^^^^^^^^^^^^^^^-----------^
+   |                                  |
+   |                                  this argument influences the return type of `execute`
+note: method defined here
+  --> src/service.rs
+   |
+   |     fn execute<C>(
+   |        ^^^^^^^

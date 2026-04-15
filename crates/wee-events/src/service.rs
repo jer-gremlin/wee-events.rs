@@ -78,3 +78,32 @@ pub trait CommandExecutor<S>: Send + Sync {
 /// and `CommandExecutor<S>`.
 pub trait Service<S>: EntityLoader<S> + CommandExecutor<S> {}
 impl<S, T: EntityLoader<S> + CommandExecutor<S>> Service<S> for T {}
+
+/// Marker trait that declares a service can handle command type `C`.
+///
+/// Implement this for each command type your service supports. The
+/// `TypedService::execute` method requires `Self: Handles<C>` so the
+/// compiler rejects calls with unregistered command types at compile time.
+pub trait Handles<C> {}
+
+/// A typed service contract combining state loading with type-safe command dispatch.
+///
+/// Unlike `Service<S>` (which takes untyped JSON), `TypedService<S>` dispatches
+/// over concrete command types. The `Handles<C>` bound on `execute` ensures only
+/// registered commands can be dispatched — unregistered commands produce a
+/// compile error rather than a runtime rejection.
+pub trait TypedService<S>: Send + Sync {
+    fn load(
+        &self,
+        id: &AggregateId,
+    ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send;
+
+    fn execute<C>(
+        &self,
+        id: &AggregateId,
+        cmd: C,
+    ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send
+    where
+        C: crate::Command + Send + 'static,
+        Self: Handles<C>;
+}
