@@ -151,7 +151,10 @@ async fn execute_dispatches_to_correct_handler_among_multiple() {
     let id = AggregateId::new("counter", "test-1");
 
     // Increment handler is invoked and returns the updated value.
-    let entity = service.execute(&id, Increment { amount: 10 }).await.unwrap();
+    let entity = service
+        .execute(&id, Increment { amount: 10 })
+        .await
+        .unwrap();
     assert_eq!(entity.state.value, 10);
 
     // Decrement handler is invoked.
@@ -220,9 +223,7 @@ async fn factory_context_bonus_applied_in_handler() {
     let service = ServiceBuilder::<Counter>::new()
         .with_loader(load_counter)
         .with_handler::<Increment, _>(increment)
-        .build(|| async {
-            Ok(TestContext { bonus: 10 })
-        });
+        .build(|| async { Ok(TestContext { bonus: 10 }) });
 
     let id = AggregateId::new("counter", "test-1");
     // amount: 2, bonus: 10 → value = 0 + 2 + 10 = 12

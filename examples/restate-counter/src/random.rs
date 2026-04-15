@@ -46,10 +46,7 @@ pub trait RandomService {
 pub struct RandomGenerator;
 
 impl RandomService for RandomGenerator {
-    async fn seed(
-        &self,
-        _ctx: Context<'_>,
-    ) -> Result<Json<f64>, HandlerError> {
+    async fn seed(&self, _ctx: Context<'_>) -> Result<Json<f64>, HandlerError> {
         let value: f64 = rand::rng().random();
         Ok(Json(value))
     }

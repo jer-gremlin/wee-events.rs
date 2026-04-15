@@ -1,8 +1,6 @@
 use serde::Deserialize;
 use serde_json::json;
-use wee_events::{
-    AggregateId, CommandName, Dispatcher, Entity, EventData, Rejection, Revision,
-};
+use wee_events::{AggregateId, CommandName, Dispatcher, Entity, EventData, Rejection, Revision};
 
 #[derive(Debug, Deserialize)]
 struct Increment {
@@ -91,7 +89,12 @@ async fn dispatch_routes_to_correct_handler() {
     let entity = test_entity();
 
     let events = dispatcher
-        .dispatch(&ctx, &entity, &CommandName::from("increment"), json!({ "amount": 5 }))
+        .dispatch(
+            &ctx,
+            &entity,
+            &CommandName::from("increment"),
+            json!({ "amount": 5 }),
+        )
         .await
         .unwrap();
 
@@ -103,8 +106,7 @@ async fn dispatch_routes_to_correct_handler() {
 
 #[tokio::test]
 async fn dispatch_rejects_unknown_command() {
-    let dispatcher = Dispatcher::<TestCtx, Counter>::new()
-        .handler("increment", increment_handler);
+    let dispatcher = Dispatcher::<TestCtx, Counter>::new().handler("increment", increment_handler);
 
     let ctx = TestCtx { multiplier: 1 };
     let entity = test_entity();
@@ -119,14 +121,18 @@ async fn dispatch_rejects_unknown_command() {
 
 #[tokio::test]
 async fn dispatch_rejects_invalid_command_payload() {
-    let dispatcher = Dispatcher::<TestCtx, Counter>::new()
-        .handler("increment", increment_handler);
+    let dispatcher = Dispatcher::<TestCtx, Counter>::new().handler("increment", increment_handler);
 
     let ctx = TestCtx { multiplier: 1 };
     let entity = test_entity();
 
     let err = dispatcher
-        .dispatch(&ctx, &entity, &CommandName::from("increment"), json!("not an object"))
+        .dispatch(
+            &ctx,
+            &entity,
+            &CommandName::from("increment"),
+            json!("not an object"),
+        )
         .await
         .unwrap_err();
 
@@ -135,8 +141,7 @@ async fn dispatch_rejects_invalid_command_payload() {
 
 #[tokio::test]
 async fn dispatch_handler_with_no_context_requirements() {
-    let dispatcher = Dispatcher::<TestCtx, Counter>::new()
-        .handler("reset", reset_handler);
+    let dispatcher = Dispatcher::<TestCtx, Counter>::new().handler("reset", reset_handler);
 
     let ctx = TestCtx { multiplier: 1 };
     let entity = test_entity();
@@ -152,8 +157,7 @@ async fn dispatch_handler_with_no_context_requirements() {
 
 #[tokio::test]
 async fn dispatch_handler_reads_entity_state() {
-    let dispatcher = Dispatcher::<TestCtx, Counter>::new()
-        .handler("decrement", decrement_handler);
+    let dispatcher = Dispatcher::<TestCtx, Counter>::new().handler("decrement", decrement_handler);
 
     let ctx = TestCtx { multiplier: 1 };
     let entity = Entity {
@@ -164,14 +168,24 @@ async fn dispatch_handler_reads_entity_state() {
 
     // Decrement within bounds succeeds
     let events = dispatcher
-        .dispatch(&ctx, &entity, &CommandName::from("decrement"), json!({ "amount": 5 }))
+        .dispatch(
+            &ctx,
+            &entity,
+            &CommandName::from("decrement"),
+            json!({ "amount": 5 }),
+        )
         .await
         .unwrap();
     assert_eq!(events.len(), 1);
 
     // Decrement exceeding value is rejected
     let err = dispatcher
-        .dispatch(&ctx, &entity, &CommandName::from("decrement"), json!({ "amount": 100 }))
+        .dispatch(
+            &ctx,
+            &entity,
+            &CommandName::from("decrement"),
+            json!({ "amount": 100 }),
+        )
         .await
         .unwrap_err();
     assert_eq!(err.code, "INSUFFICIENT_VALUE");

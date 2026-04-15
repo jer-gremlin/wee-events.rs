@@ -215,7 +215,8 @@ impl<A: TursoPlatformApi, M: PartitionMetadataStore> TursoPlatformProvisionerImp
     }
 
     fn is_managed_named_database(&self, db_name: &str) -> bool {
-        db_name != self.db_name_for(PartitionName::Default) && db_name.starts_with(&self.named_db_prefix())
+        db_name != self.db_name_for(PartitionName::Default)
+            && db_name.starts_with(&self.named_db_prefix())
     }
 
     async fn lookup_existing_database(&self, db_name: &str) -> Result<Option<DatabaseInfo>, Error> {
@@ -377,7 +378,10 @@ impl<A: TursoPlatformApi, M: PartitionMetadataStore> NamedTargetProvisioner
         .await?;
         names.sort();
         names.dedup();
-        self.known_names.lock().unwrap().extend(names.iter().cloned());
+        self.known_names
+            .lock()
+            .unwrap()
+            .extend(names.iter().cloned());
         Ok(names)
     }
 
@@ -417,8 +421,8 @@ impl<A: TursoPlatformApi, M: PartitionMetadataStore> TursoProvisioner
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     use super::*;
     use api::fake::FakeTursoPlatformApi;
@@ -491,11 +495,7 @@ mod tests {
     type TestMetadata = Arc<FakePartitionMetadataStore>;
     type TestProvisioner = TursoPlatformProvisionerImpl<TestApi, TestMetadata>;
 
-    fn test_provisioner() -> (
-        TestApi,
-        TestMetadata,
-        TestProvisioner,
-    ) {
+    fn test_provisioner() -> (TestApi, TestMetadata, TestProvisioner) {
         let api = Arc::new(FakeTursoPlatformApi::new());
         let metadata = Arc::new(FakePartitionMetadataStore::new());
         let provisioner = TestProvisioner::with_api_and_metadata(
@@ -690,7 +690,10 @@ mod tests {
             .create_database(&sanitize_database_name("orders", "myapp"), "default")
             .await
             .expect("database should be created");
-        metadata.seed(&provisioner.make_target(&created.hostname), "tenant/acme:blue");
+        metadata.seed(
+            &provisioner.make_target(&created.hostname),
+            "tenant/acme:blue",
+        );
 
         let names = provisioner.names().await.expect("names should enumerate");
         assert_eq!(names, vec!["tenant/acme:blue".to_string()]);

@@ -147,9 +147,9 @@ where
                 .downcast::<Ctx>()
                 .expect("erase_loader: context type mismatch (this is a bug)");
             let loader = Arc::clone(&loader);
-            Box::pin(async move {
-                <&F as LoaderBridge<'_, Ctx, S>>::call(&*loader, &*ctx, &id).await
-            })
+            Box::pin(
+                async move { <&F as LoaderBridge<'_, Ctx, S>>::call(&*loader, &*ctx, &id).await },
+            )
         },
     )
 }
@@ -228,11 +228,7 @@ where
 
 #[doc(hidden)]
 pub trait LoaderBridge<'a, Ctx: 'a, S: 'a>: Sized {
-    fn call(
-        f: Self,
-        ctx: &'a Ctx,
-        id: &'a AggregateId,
-    ) -> BoxFuture<'a, crate::Result<Entity<S>>>;
+    fn call(f: Self, ctx: &'a Ctx, id: &'a AggregateId) -> BoxFuture<'a, crate::Result<Entity<S>>>;
 }
 
 impl<'a, Ctx, S, F, Fut> LoaderBridge<'a, Ctx, S> for &'a F
@@ -242,11 +238,7 @@ where
     F: Fn(&'a Ctx, &'a AggregateId) -> Fut,
     Fut: Future<Output = crate::Result<Entity<S>>> + Send + 'a,
 {
-    fn call(
-        f: Self,
-        ctx: &'a Ctx,
-        id: &'a AggregateId,
-    ) -> BoxFuture<'a, crate::Result<Entity<S>>> {
+    fn call(f: Self, ctx: &'a Ctx, id: &'a AggregateId) -> BoxFuture<'a, crate::Result<Entity<S>>> {
         Box::pin(f(ctx, id))
     }
 }
@@ -385,8 +377,7 @@ impl<C, Idx, Ctx, S, L, F, Handlers> Handles<C, Idx> for BuiltService<Ctx, S, L,
 /// A boxed async factory that produces a fresh `Ctx` per call.
 ///
 /// Erasing the future type here keeps `BuiltService`'s type signature clean.
-pub type Factory<Ctx> =
-    Box<dyn Fn() -> BoxFuture<'static, crate::Result<Ctx>> + Send + Sync>;
+pub type Factory<Ctx> = Box<dyn Fn() -> BoxFuture<'static, crate::Result<Ctx>> + Send + Sync>;
 
 // ---------------------------------------------------------------------------
 // BuiltService
@@ -474,8 +465,7 @@ where
         let id = id.clone();
         async move {
             let ctx = (self.factory)().await?;
-            let entity =
-                <&L as LoaderBridge<'_, Ctx, S>>::call(&self.loader, &ctx, &id).await?;
+            let entity = <&L as LoaderBridge<'_, Ctx, S>>::call(&self.loader, &ctx, &id).await?;
             self.handlers.handle(&ctx, &entity, cmd).await
         }
     }
@@ -531,10 +521,7 @@ impl<S, L, Handlers> ServiceBuilder<S, L, Handlers> {
     ///
     /// Each call prepends a new `HandlerList<C, H, Tail>` node, so the compiler
     /// tracks which commands are registered in the type.
-    pub fn with_handler<C, H>(
-        self,
-        handler: H,
-    ) -> ServiceBuilder<S, L, HandlerList<C, H, Handlers>>
+    pub fn with_handler<C, H>(self, handler: H) -> ServiceBuilder<S, L, HandlerList<C, H, Handlers>>
     where
         C: Command,
     {
@@ -555,10 +542,7 @@ impl<S, L, Handlers> ServiceBuilder<S, L, Handlers> {
     /// `load` or `execute` invocation to produce a fresh context. The concrete
     /// future type is erased into a `Box<dyn Future>` so `BuiltService`'s type
     /// stays ergonomic.
-    pub fn build<Ctx, F, Fut>(
-        self,
-        factory: F,
-    ) -> BuiltService<Ctx, S, L, Factory<Ctx>, Handlers>
+    pub fn build<Ctx, F, Fut>(self, factory: F) -> BuiltService<Ctx, S, L, Factory<Ctx>, Handlers>
     where
         Ctx: Send + Sync + 'static,
         F: Fn() -> Fut + Send + Sync + 'static,

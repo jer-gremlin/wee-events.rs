@@ -4,7 +4,7 @@ use restate_sdk::prelude::*;
 
 use crate::names;
 use crate::service::JsonService;
-use crate::types::{ExecuteRequest, EntityResponse};
+use crate::types::{EntityResponse, ExecuteRequest};
 
 pub struct CommandHandler<T> {
     service: Arc<T>,

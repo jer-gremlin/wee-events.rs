@@ -33,9 +33,7 @@ impl MemoryStore {
     }
 
     pub fn from_shared(backing: Arc<MemoryStoreBacking>) -> Self {
-        Self {
-            backing,
-        }
+        Self { backing }
     }
 
     fn generate_ulid(&self) -> Result<String, Error> {
@@ -73,21 +71,13 @@ impl Default for MemoryStoreBacking {
 impl MemoryStore {
     /// Returns all distinct aggregate IDs in the store.
     pub fn enumerate_aggregates(&self) -> Vec<AggregateId> {
-        let streams = self
-            .backing
-            .streams
-            .lock()
-            .expect("streams mutex poisoned");
+        let streams = self.backing.streams.lock().expect("streams mutex poisoned");
         streams.keys().cloned().collect()
     }
 
     /// Returns all distinct aggregate IDs of a given type.
     pub fn enumerate_aggregates_by_type(&self, aggregate_type: &AggregateType) -> Vec<AggregateId> {
-        let streams = self
-            .backing
-            .streams
-            .lock()
-            .expect("streams mutex poisoned");
+        let streams = self.backing.streams.lock().expect("streams mutex poisoned");
         streams
             .keys()
             .filter(|id| *id.aggregate_type() == *aggregate_type)
@@ -98,11 +88,7 @@ impl MemoryStore {
 
 impl EventStore for MemoryStore {
     async fn load(&self, id: &AggregateId) -> Result<Aggregate, Error> {
-        let streams = self
-            .backing
-            .streams
-            .lock()
-            .expect("streams mutex poisoned");
+        let streams = self.backing.streams.lock().expect("streams mutex poisoned");
 
         match streams.get(id) {
             Some(events) if !events.is_empty() => {
@@ -118,11 +104,7 @@ impl EventStore for MemoryStore {
         options: PublishOptions,
         events: Vec<RawEvent>,
     ) -> Result<ChangeSet, Error> {
-        let mut streams = self
-            .backing
-            .streams
-            .lock()
-            .expect("streams mutex poisoned");
+        let mut streams = self.backing.streams.lock().expect("streams mutex poisoned");
 
         if events.is_empty() {
             let revision = streams

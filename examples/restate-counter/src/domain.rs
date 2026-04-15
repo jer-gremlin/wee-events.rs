@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use wee_events::{CommandName, Dispatcher, Entity, EventData, EventType, RawEvent, Rejection, Renderer};
+use wee_events::{
+    CommandName, Dispatcher, Entity, EventData, EventType, RawEvent, Rejection, Renderer,
+};
 
 use crate::random::HasRandomSource;
 

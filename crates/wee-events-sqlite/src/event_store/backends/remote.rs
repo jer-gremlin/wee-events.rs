@@ -81,20 +81,23 @@ where
 
     async fn partitions(&self) -> Result<Vec<S::Partition>, Error> {
         let named_targets = self.provisioner.named_targets().await?;
-        let mut partitions: Vec<S::Partition> = try_join_all(named_targets.into_iter().map(
-            |(name, target)| async move {
+        let mut partitions: Vec<S::Partition> =
+            try_join_all(named_targets.into_iter().map(|(name, target)| async move {
                 let conn = database::open_event_store_connection(&target).await?;
                 let partition = match database::load_partition_name(&conn).await? {
                     Some(name) => Some(self.strategy.partition_from_name(&name)?),
-                    None => self.strategy.partition_from_target_name(&name, &target).await?,
+                    None => {
+                        self.strategy
+                            .partition_from_target_name(&name, &target)
+                            .await?
+                    }
                 };
                 Ok::<Option<S::Partition>, Error>(partition)
-            },
-        ))
-        .await?
-        .into_iter()
-        .flatten()
-        .collect();
+            }))
+            .await?
+            .into_iter()
+            .flatten()
+            .collect();
         partitions.extend(
             self.strategy
                 .bootstrap_partitions()

@@ -110,9 +110,10 @@ impl NamedTargetProvisioner for CollidingLocalProvisioner {
             return Ok(None);
         };
 
-        Ok(self.path.exists().then_some(DatabaseTarget::Local(
-            (*self.path).clone(),
-        )))
+        Ok(self
+            .path
+            .exists()
+            .then_some(DatabaseTarget::Local((*self.path).clone())))
     }
 }
 

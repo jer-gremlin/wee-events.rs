@@ -140,7 +140,10 @@ mod tests {
         );
 
         let create = test_notification("create");
-        assert_eq!(router.matching_effects(&create), vec!["audit-log", "notifications"]);
+        assert_eq!(
+            router.matching_effects(&create),
+            vec!["audit-log", "notifications"]
+        );
 
         let delete = test_notification("delete");
         assert_eq!(router.matching_effects(&delete), vec!["audit-log"]);

@@ -349,7 +349,9 @@ where
     }
 }
 
-async fn make_local_store_pair<S>(strategy: S) -> (TempStore<LocalStore<S>>, TempStore<LocalStore<S>>)
+async fn make_local_store_pair<S>(
+    strategy: S,
+) -> (TempStore<LocalStore<S>>, TempStore<LocalStore<S>>)
 where
     S: LocalPartitionStrategy + LocalStorePath + Clone,
 {
@@ -376,7 +378,9 @@ where
             store: store_a,
         },
         TempStore {
-            _guard: TestStoreGuard::TempDir { _temp_dir: temp_dir },
+            _guard: TestStoreGuard::TempDir {
+                _temp_dir: temp_dir,
+            },
             store: store_b,
         },
     )
