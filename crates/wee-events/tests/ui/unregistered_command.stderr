@@ -16,5 +16,5 @@ help: the return type of this call is `Unsupported` due to the type of the argum
 note: method defined here
   --> src/service.rs
    |
-   |     fn execute<C>(
+   |     fn execute<C, Idx>(
    |        ^^^^^^^

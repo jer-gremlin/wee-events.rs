@@ -45,14 +45,14 @@ impl TypedService<Counter> for TestService {
         }
     }
 
-    fn execute<C>(
+    fn execute<C, Idx>(
         &self,
         id: &AggregateId,
         _cmd: C,
     ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
     where
         C: Command + Send + 'static,
-        Self: Handles<C>,
+        Self: Handles<C, Idx>,
     {
         let id = id.clone();
         async move {
