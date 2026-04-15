@@ -30,9 +30,14 @@ pub use id::{
 };
 pub use renderer::{ReduceFn, Renderer};
 pub use service::{CommandExecutor, EntityLoader, Handles, Rejection, Service, TypedService};
-pub use service_builder::{BuiltService, Factory, ServiceBuilder};
+pub use service_builder::{
+    erase_factory, erase_handler, erase_loader, BuiltService, ErasedFactory, ErasedHandler,
+    ErasedLoader, Factory, ServiceBuilder,
+};
+#[doc(hidden)]
+pub use service_builder::{HandleCommand, HandlerBridge, HandlerList, LoaderBridge};
 pub use store::{EventStore, PublishOptions, RawEvent};
-pub use wee_events_macros::{Command, DomainEvent};
+pub use wee_events_macros::{service, Command, DomainEvent};
 
 pub mod memory {
     pub use crate::memory_store::{MemoryStore, MemoryStoreBacking};
