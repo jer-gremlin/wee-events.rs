@@ -19,11 +19,13 @@ struct Counter {
     value: i64,
 }
 
-/// Commands are plain structs — no derive needed for this test.
+/// Commands are plain structs with Serialize for the TypedService contract.
+#[derive(serde::Serialize)]
 struct Increment {
     amount: i64,
 }
 
+#[derive(serde::Serialize)]
 struct Decrement {
     amount: i64,
 }

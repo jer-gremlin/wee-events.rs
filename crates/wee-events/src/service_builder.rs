@@ -467,7 +467,7 @@ where
         cmd: C,
     ) -> impl Future<Output = crate::Result<Entity<S>>> + Send + '_
     where
-        C: Command + Send + 'static,
+        C: Command + serde::Serialize + Send + 'static,
         Self: Handles<C, Idx>,
         Handlers: HandleCommand<C, Idx, Ctx, S>,
     {

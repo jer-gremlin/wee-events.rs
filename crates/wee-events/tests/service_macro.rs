@@ -1,11 +1,11 @@
-use wee_events::{AggregateId, Command, CommandName, Entity, Revision};
+use wee_events::{AggregateId, Command, CommandName, Entity, Handles, Revision, TypedService};
 
 #[derive(Debug, Default, Clone)]
 struct Counter {
     value: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct Increment {
     amount: i64,
 }
@@ -16,7 +16,7 @@ impl Command for Increment {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct Adjust;
 
 impl Command for Adjust {
@@ -87,5 +87,34 @@ async fn generated_service_loads() {
     let service = CounterService::build(|| async { Ok(TestContext) });
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = service.load(&id).await.unwrap();
+    assert_eq!(entity.state.value, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Shared-caller pattern
+// ---------------------------------------------------------------------------
+
+/// A function that accepts any `TypedService<Counter>` implementation and
+/// exercises both commands. This is the "shared caller" pattern — the same
+/// business logic works whether it is given a local service or a remote client.
+async fn shared_caller<T>(svc: &T, id: &AggregateId) -> wee_events::Result<Entity<Counter>>
+where
+    T: TypedService<Counter> + Handles<Increment, ()> + Handles<Adjust, ()>,
+{
+    let entity = svc.execute(id, Increment { amount: 10 }).await?;
+    // Adjust is a no-op in this test implementation; it returns the entity as-is.
+    let _ = entity;
+    svc.execute(id, Adjust).await
+}
+
+/// Verify that the `service!`-generated struct satisfies `TypedService<Counter>`
+/// and can be passed to the shared-caller helper.
+#[tokio::test]
+async fn shared_caller_works_with_service_macro() {
+    let service = CounterService::build(|| async { Ok(TestContext) });
+    let id: AggregateId = "counter:c1".parse().unwrap();
+    let entity = shared_caller(&service, &id).await.unwrap();
+    // Adjust returns the entity as loaded (Counter { value: 0 }) since the
+    // test loader always returns the default state.
     assert_eq!(entity.state.value, 0);
 }

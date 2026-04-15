@@ -146,7 +146,7 @@ fn generate(service: ServiceInput) -> TokenStream2 {
                 Output = wee_events::Result<wee_events::Entity<#state_type>>,
             > + ::std::marker::Send + '_
             where
-                C: wee_events::Command + ::std::marker::Send + 'static,
+                C: wee_events::Command + ::serde::Serialize + ::std::marker::Send + 'static,
                 Self: wee_events::Handles<C, Idx>,
             {
                 #name::execute(self, id, cmd)
