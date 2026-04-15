@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use wee_events::{Dispatcher, Entity, EventData, EventType, RawEvent, Rejection, Renderer};
+use wee_events::{CommandName, Dispatcher, Entity, EventData, EventType, RawEvent, Rejection, Renderer};
 
 use crate::random::HasRandomSource;
 
@@ -9,7 +9,7 @@ use crate::random::HasRandomSource;
 // State
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Counter {
     pub value: i64,
 }
@@ -18,19 +18,37 @@ pub struct Counter {
 // Commands
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Increment {
     pub amount: i64,
 }
 
-#[derive(Debug, Deserialize)]
+impl wee_events::Command for Increment {
+    fn command_name(&self) -> CommandName {
+        CommandName::from("increment")
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Decrement {
     pub amount: i64,
 }
 
+impl wee_events::Command for Decrement {
+    fn command_name(&self) -> CommandName {
+        CommandName::from("decrement")
+    }
+}
+
 /// No payload — the adjustment is derived from the random source and balance.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Adjust;
+
+impl wee_events::Command for Adjust {
+    fn command_name(&self) -> CommandName {
+        CommandName::from("adjust")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -160,4 +178,27 @@ pub fn build_renderer() -> Renderer<Counter> {
     Renderer::new()
         .with("counter:incremented", reduce_incremented)
         .with("counter:decremented", reduce_decremented)
+}
+
+// ---------------------------------------------------------------------------
+// Typed service — generated client and server dispatch helper
+//
+// `CounterServiceClient`  — typed Restate ingress client.
+//   Use `CounterServiceClient::new(ingress_url, service_name)` to create an
+//   instance. Call `.execute(&id, Increment { amount: 5 })` to dispatch a
+//   command; the compile-time `Handles<C>` bound rejects unregistered types.
+//
+// `CounterServiceServer` — zero-size server dispatch helper.
+//   Use `CounterServiceServer::dispatch_json(service, name, target, payload)`
+//   to route an incoming JSON-encoded command to the appropriate typed handler.
+// ---------------------------------------------------------------------------
+
+wee_events_restate::restate_service! {
+    pub CounterService for Counter {
+        handlers: [
+            Increment => increment,
+            Decrement => decrement,
+            Adjust => adjust,
+        ],
+    }
 }
