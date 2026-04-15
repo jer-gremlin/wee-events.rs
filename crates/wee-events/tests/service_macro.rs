@@ -64,7 +64,12 @@ wee_events::service! {
 
 #[tokio::test]
 async fn generated_service_builds_and_executes() {
-    let service = CounterService::build(|| async { Ok(TestContext) });
+    let service = CounterService::build(
+        || async { Ok(TestContext) },
+        load_counter,
+        increment,
+        adjust,
+    );
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = service.execute(&id, Increment { amount: 3 }).await.unwrap();
     assert_eq!(entity.state.value, 3);
@@ -72,7 +77,12 @@ async fn generated_service_builds_and_executes() {
 
 #[tokio::test]
 async fn generated_service_handles_multiple_commands() {
-    let service = CounterService::build(|| async { Ok(TestContext) });
+    let service = CounterService::build(
+        || async { Ok(TestContext) },
+        load_counter,
+        increment,
+        adjust,
+    );
     let id: AggregateId = "counter:c1".parse().unwrap();
     let _ = service.execute(&id, Increment { amount: 3 }).await.unwrap();
     let _ = service.execute(&id, Adjust).await.unwrap();
@@ -80,7 +90,12 @@ async fn generated_service_handles_multiple_commands() {
 
 #[tokio::test]
 async fn generated_service_loads() {
-    let service = CounterService::build(|| async { Ok(TestContext) });
+    let service = CounterService::build(
+        || async { Ok(TestContext) },
+        load_counter,
+        increment,
+        adjust,
+    );
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = service.load(&id).await.unwrap();
     assert_eq!(entity.state.value, 0);
@@ -95,7 +110,7 @@ async fn generated_service_loads() {
 /// business logic works whether it is given a local service or a remote client.
 async fn shared_caller<T>(svc: &T, id: &AggregateId) -> wee_events::Result<Entity<Counter>>
 where
-    T: TypedService<Counter> + Handles<Increment> + Handles<Adjust>,
+    T: TypedService<Counter> + Handles<Increment, Counter> + Handles<Adjust, Counter>,
 {
     let entity = svc.execute(id, Increment { amount: 10 }).await?;
     // Adjust is a no-op in this test implementation; it returns the entity as-is.
@@ -107,7 +122,12 @@ where
 /// and can be passed to the shared-caller helper.
 #[tokio::test]
 async fn shared_caller_works_with_service_macro() {
-    let service = CounterService::build(|| async { Ok(TestContext) });
+    let service = CounterService::build(
+        || async { Ok(TestContext) },
+        load_counter,
+        increment,
+        adjust,
+    );
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = shared_caller(&service, &id).await.unwrap();
     // Adjust returns the entity as loaded (Counter { value: 0 }) since the

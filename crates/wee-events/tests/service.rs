@@ -154,7 +154,29 @@ impl Command for Increment {
 
 struct TypedCounterService;
 
-impl Handles<Increment> for TypedCounterService {}
+// Implement ServiceState<S> — phantom marker, required by DispatchCommand<C, S> supertrait
+impl wee_events::__private::ServiceState<Counter> for TypedCounterService {}
+
+// Implement DispatchCommand<Increment, Counter> — required by Handles<Increment, Counter>
+impl wee_events::__private::DispatchCommand<Increment, Counter> for TypedCounterService {
+    fn dispatch_command(
+        &self,
+        id: &AggregateId,
+        cmd: Increment,
+    ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send {
+        let id = id.clone();
+        async move {
+            Ok(Entity {
+                aggregate_id: id,
+                revision: Revision::zero(),
+                state: Counter { value: cmd.amount },
+            })
+        }
+    }
+}
+
+// Handles<Increment, Counter> is satisfied because DispatchCommand<Increment, Counter> is implemented
+impl Handles<Increment, Counter> for TypedCounterService {}
 
 impl TypedService<Counter> for TypedCounterService {
     fn load(
@@ -170,32 +192,7 @@ impl TypedService<Counter> for TypedCounterService {
             })
         }
     }
-
-    // The Handles<C> bound guarantees C is Increment at every valid call site,
-    // so we can safely downcast without a fallback branch.
-    fn execute<C>(
-        &self,
-        id: &AggregateId,
-        cmd: C,
-    ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send
-    where
-        C: Command + Send + 'static,
-        Self: Handles<C>,
-    {
-        use std::any::Any;
-        let id = id.clone();
-        async move {
-            let cmd_any: Box<dyn Any> = Box::new(cmd);
-            let inc = cmd_any
-                .downcast::<Increment>()
-                .expect("Handles<C> guarantees C is Increment");
-            Ok(Entity {
-                aggregate_id: id,
-                revision: Revision::zero(),
-                state: Counter { value: inc.amount },
-            })
-        }
-    }
+    // execute() uses the default impl from TypedService which calls DispatchCommand
 }
 
 #[tokio::test]

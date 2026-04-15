@@ -93,6 +93,27 @@ impl Parse for ServiceInput {
 }
 
 // ---------------------------------------------------------------------------
+// Idx computation
+//
+// Handlers are registered via `with_handler` which prepends to the HList.
+// Input: [Cmd0, Cmd1, ..., CmdN-1]
+// After build: HandlerList<CmdN-1, ..., HandlerList<Cmd0, _, EmptyHandlers>>
+// So the last input command (index N-1) is the head → Here
+//    the first input command (index 0) is deepest → There^(N-1)<Here>
+//
+// General: input index i → depth = N - 1 - i levels of There<...>
+// ---------------------------------------------------------------------------
+
+fn compute_idx(input_index: usize, total: usize) -> TokenStream2 {
+    let depth = total - 1 - input_index;
+    let mut idx = quote! { wee_events::Here };
+    for _ in 0..depth {
+        idx = quote! { wee_events::There<#idx> };
+    }
+    idx
+}
+
+// ---------------------------------------------------------------------------
 // Code generation
 // ---------------------------------------------------------------------------
 
@@ -108,221 +129,185 @@ fn generate(service: ServiceInput) -> TokenStream2 {
         vis,
         name,
         state_type,
-        loader_fn,
+        loader_fn: _loader_fn,
         handler_entries,
     } = service;
 
-    // Per-command field names: `handler_0`, `handler_1`, ...
-    let field_names: Vec<Ident> = handler_entries
+    let total = handler_entries.len();
+    let cmd_types: Vec<&Path> = handler_entries.iter().map(|e| &e.command_type).collect();
+    let _handler_fns: Vec<&Path> = handler_entries.iter().map(|e| &e.handler_fn).collect();
+
+    // Generic type params for handlers: __H0, __H1, ...
+    let handler_tparams: Vec<proc_macro2::Ident> = (0..total)
+        .map(|i| format_ident!("__H{}", i))
+        .collect();
+
+    // Generic type param for loader
+    let loader_tparam = format_ident!("__L");
+
+    // Handles<Cmd, State> bounds for the return type
+    let handles_bounds: Vec<TokenStream2> = cmd_types
+        .iter()
+        .map(|cmd| quote! { + wee_events::Handles<#cmd, #state_type> })
+        .collect();
+
+    // WHERE bounds for build(): loader and handlers constrain __Ctx
+    let loader_bridge_bound = quote! {
+        for<'a> &'a #loader_tparam: wee_events::LoaderBridge<'a, __Ctx, #state_type>,
+    };
+    let handler_bridge_bounds: Vec<TokenStream2> = cmd_types
+        .iter()
+        .zip(handler_tparams.iter())
+        .map(|(cmd, hp)| {
+            quote! {
+                for<'a> &'a #hp: wee_events::HandlerBridge<'a, __Ctx, #state_type, #cmd>,
+            }
+        })
+        .collect();
+
+    // Extra WHERE bounds for the type params themselves
+    let loader_tparam_bound = quote! {
+        #loader_tparam: ::std::marker::Send + ::std::marker::Sync + 'static,
+    };
+    let handler_tparam_bounds: Vec<TokenStream2> = handler_tparams
+        .iter()
+        .map(|hp| {
+            quote! {
+                #hp: ::std::marker::Send + ::std::marker::Sync + 'static,
+            }
+        })
+        .collect();
+
+    // build() parameter list
+    let loader_param = quote! { loader: #loader_tparam };
+    let handler_params: Vec<TokenStream2> = handler_tparams
         .iter()
         .enumerate()
-        .map(|(i, _)| format_ident!("handler_{}", i))
-        .collect();
-
-    let cmd_types: Vec<&Path> = handler_entries.iter().map(|e| &e.command_type).collect();
-    let handler_fns: Vec<&Path> = handler_entries.iter().map(|e| &e.handler_fn).collect();
-
-    // Struct field declarations: `handler_0: wee_events::ErasedHandler<S>, ...`
-    let field_decls: Vec<TokenStream2> = field_names
-        .iter()
-        .map(|field| {
-            quote! {
-                #field: wee_events::ErasedHandler<#state_type>,
-            }
+        .map(|(i, hp)| {
+            let pname = format_ident!("handler_{}", i);
+            quote! { #pname: #hp }
         })
         .collect();
 
-    // Field initializers in `build()`:
-    // `handler_0: wee_events::erase_handler::<_, S, CmdType, _>(handler_fn), ...`
-    let field_inits: Vec<TokenStream2> = field_names
+    // with_loader + with_handler chain using the parameter names
+    let with_loader_call = quote! { .with_loader(loader) };
+    let with_handler_calls: Vec<TokenStream2> = cmd_types
         .iter()
-        .zip(cmd_types.iter())
-        .zip(handler_fns.iter())
-        .map(|((field, cmd), handler)| {
-            quote! {
-                #field: wee_events::erase_handler::<_, #state_type, #cmd, _>(#handler),
-            }
+        .enumerate()
+        .map(|(i, cmd)| {
+            let pname = format_ident!("handler_{}", i);
+            quote! { .with_handler::<#cmd, _>(#pname) }
         })
         .collect();
 
-    // `impl Handles<Cmd>` for each registered command — no Idx on the public trait.
-    let handles_impls: Vec<TokenStream2> = cmd_types
-        .iter()
-        .map(|cmd| {
-            quote! {
-                impl wee_events::Handles<#cmd> for #name {}
-            }
-        })
-        .collect();
-
-    // Static TypeId if-chain for `execute`: one branch per command.
-    // Each branch downcasts cmd to the concrete type and calls the stored
-    // ErasedHandler for that command. Because the chain is generated at
-    // compile time with fixed types, there is no runtime data-structure scan.
-    let dispatch_arms: Vec<TokenStream2> = field_names
-        .iter()
-        .zip(cmd_types.iter())
-        .map(|(field, cmd)| {
-            quote! {
-                if __type_id == ::std::any::TypeId::of::<#cmd>() {
-                    let concrete = *__cmd_any.downcast::<#cmd>().unwrap();
-                    return (self.#field)(
-                        ::std::sync::Arc::clone(&__ctx),
-                        __entity,
-                        ::std::boxed::Box::new(concrete),
-                    )
-                    .await;
-                }
-            }
-        })
-        .collect();
-
-    // TypedService impl — load delegates directly; execute uses the static if-chain.
-    let typed_service_impl = quote! {
-        impl wee_events::TypedService<#state_type> for #name {
-            fn load(
-                &self,
-                id: &wee_events::AggregateId,
-            ) -> impl ::std::future::Future<
-                Output = wee_events::Result<wee_events::Entity<#state_type>>,
-            > + ::std::marker::Send + '_ {
-                #name::load(self, id)
-            }
-
-            fn execute<C>(
-                &self,
-                id: &wee_events::AggregateId,
-                cmd: C,
-            ) -> impl ::std::future::Future<
-                Output = wee_events::Result<wee_events::Entity<#state_type>>,
-            > + ::std::marker::Send + '_
-            where
-                C: wee_events::Command + ::std::marker::Send + 'static,
-                Self: wee_events::Handles<C>,
-            {
-                #name::execute(self, id, cmd)
-            }
+    // All type params for build(): __Ctx, __F, __Fut, __L, __H0, __H1, ...
+    let all_build_tparams: Vec<TokenStream2> = {
+        let mut v = vec![
+            quote! { __Ctx },
+            quote! { __F },
+            quote! { __Fut },
+            quote! { #loader_tparam },
+        ];
+        for hp in &handler_tparams {
+            v.push(quote! { #hp });
         }
+        v
     };
 
-    quote! {
-        /// Generated service struct.
-        ///
-        /// The context type `Ctx` is erased at build time via `ErasedFactory` and
-        /// `ErasedLoader`; concrete handlers are stored as individually-named fields
-        /// (one per registered command) rather than a runtime `Vec`. The `execute`
-        /// method dispatches via a generated static `TypeId` if-chain — no Vec scan.
-        #vis struct #name {
-            factory: wee_events::ErasedFactory,
-            loader: wee_events::ErasedLoader<#state_type>,
-            #(#field_decls)*
-        }
+    // Per-command DispatchCommand impls on the concrete BuiltService type.
+    // These are generic over __Ctx, __L, __F, __H — verified at the call site
+    // of execute() where the concrete types are known.
+    let dispatch_impls: Vec<TokenStream2> = cmd_types
+        .iter()
+        .enumerate()
+        .map(|(i, cmd)| {
+            let idx = compute_idx(i, total);
+            quote! {
+                impl<__Ctx, __L, __F, __H> wee_events::__private::DispatchCommand<#cmd, #state_type>
+                    for wee_events::BuiltService<__Ctx, #state_type, __L, __F, __H>
+                where
+                    __Ctx: ::std::marker::Send + ::std::marker::Sync + 'static,
+                    __L: ::std::marker::Send + ::std::marker::Sync + 'static,
+                    __F: ::std::marker::Send + ::std::marker::Sync + 'static,
+                    __H: ::std::marker::Send + ::std::marker::Sync + 'static,
+                    for<'a> &'a __L: wee_events::LoaderBridge<'a, __Ctx, #state_type>,
+                    for<'a> &'a __F: wee_events::FactoryBridge<'a, __Ctx>,
+                    __H: wee_events::HandleCommand<#cmd, #idx, __Ctx, #state_type>,
+                {
+                    fn dispatch_command(
+                        &self,
+                        id: &wee_events::AggregateId,
+                        cmd: #cmd,
+                    ) -> impl ::std::future::Future<
+                        Output = wee_events::Result<wee_events::Entity<#state_type>>,
+                    > + ::std::marker::Send {
+                        let id = id.clone();
+                        async move {
+                            let ctx = <&__F as wee_events::FactoryBridge<'_, __Ctx>>::call(&self.factory).await?;
+                            let entity = <&__L as wee_events::LoaderBridge<'_, __Ctx, #state_type>>::call(&self.loader, &ctx, &id).await?;
+                            self.handlers.handle(&ctx, &entity, cmd).await
+                        }
+                    }
+                }
 
-        // SAFETY: All fields are `Send + Sync` by construction.
-        unsafe impl ::std::marker::Send for #name
-        where
-            wee_events::ErasedFactory: ::std::marker::Send,
-            wee_events::ErasedLoader<#state_type>: ::std::marker::Send,
-            wee_events::ErasedHandler<#state_type>: ::std::marker::Send,
-        {}
-        unsafe impl ::std::marker::Sync for #name
-        where
-            wee_events::ErasedFactory: ::std::marker::Sync,
-            wee_events::ErasedLoader<#state_type>: ::std::marker::Sync,
-            wee_events::ErasedHandler<#state_type>: ::std::marker::Sync,
-        {}
+                impl<__Ctx, __L, __F, __H> wee_events::Handles<#cmd, #state_type>
+                    for wee_events::BuiltService<__Ctx, #state_type, __L, __F, __H>
+                where
+                    wee_events::BuiltService<__Ctx, #state_type, __L, __F, __H>:
+                        wee_events::__private::DispatchCommand<#cmd, #state_type>,
+                {}
+            }
+        })
+        .collect();
+
+    quote! {
+        /// Generated service namespace.
+        ///
+        /// Call `build(factory, loader, handler_0, ...)` to produce a typed service
+        /// with fully static dispatch. All type parameters are inferred from the
+        /// arguments — no type erasure, no `Box<dyn Any>`.
+        ///
+        /// For convenience with the default (baked-in) loader and handlers, use
+        /// `build_default(factory)`.
+        #vis struct #name;
 
         impl #name {
-            /// Build a service instance from the given async context factory.
+            /// Build a service with explicit loader and handler arguments.
             ///
-            /// `Ctx` is inferred from the factory closure and must match the
-            /// context type expected by the loader and handler functions baked
-            /// into this service.
-            #vis fn build<Ctx, F, Fut>(factory: F) -> Self
+            /// The factory, loader, and handlers must all agree on the context
+            /// type `Ctx` (inferred from the arguments).
+            ///
+            /// Returns an opaque type implementing `TypedService<S>` and `Handles<C>`
+            /// for each registered command. Dispatch is fully static.
+            #vis fn build<#(#all_build_tparams,)*>(
+                factory: __F,
+                #loader_param,
+                #(#handler_params,)*
+            ) -> impl wee_events::TypedService<#state_type>
+                     #(#handles_bounds)*
             where
-                Ctx: ::std::any::Any
+                __Ctx: ::std::marker::Send + ::std::marker::Sync + 'static,
+                __F: ::std::ops::Fn() -> __Fut
                     + ::std::marker::Send
                     + ::std::marker::Sync
                     + 'static,
-                F: ::std::ops::Fn() -> Fut
-                    + ::std::marker::Send
-                    + ::std::marker::Sync
-                    + 'static,
-                Fut: ::std::future::Future<Output = wee_events::Result<Ctx>>
+                __Fut: ::std::future::Future<Output = wee_events::Result<__Ctx>>
                     + ::std::marker::Send
                     + 'static,
+                for<'a> &'a __F: wee_events::FactoryBridge<'a, __Ctx>,
+                #loader_tparam_bound
+                #loader_bridge_bound
+                #(#handler_tparam_bounds)*
+                #(#handler_bridge_bounds)*
             {
-                Self {
-                    factory: wee_events::erase_factory::<Ctx, _, _>(factory),
-                    loader: wee_events::erase_loader::<_, #state_type, _>(#loader_fn),
-                    #(#field_inits)*
-                }
+                wee_events::ServiceBuilder::<#state_type>::new()
+                    #with_loader_call
+                    #(#with_handler_calls)*
+                    .build(factory)
             }
 
-            /// Load the current entity state for the given aggregate.
-            #vis fn load(
-                &self,
-                id: &wee_events::AggregateId,
-            ) -> impl ::std::future::Future<
-                Output = wee_events::Result<wee_events::Entity<#state_type>>,
-            > + ::std::marker::Send + '_ {
-                let id = id.clone();
-                async move {
-                    let ctx = (self.factory)().await?;
-                    (self.loader)(ctx, id).await
-                }
-            }
-
-            /// Execute a typed command against the aggregate.
-            ///
-            /// `Self: Handles<C>` is satisfied only for command types registered in the
-            /// `service!` invocation — unregistered commands produce a compile error.
-            ///
-            /// Dispatch is via a generated static `TypeId` if-chain (one branch per
-            /// registered command, inlined at codegen time). There is no runtime Vec or
-            /// HashMap lookup.
-            #vis fn execute<C>(
-                &self,
-                id: &wee_events::AggregateId,
-                cmd: C,
-            ) -> impl ::std::future::Future<
-                Output = wee_events::Result<wee_events::Entity<#state_type>>,
-            > + ::std::marker::Send + '_
-            where
-                C: wee_events::Command
-                    + ::std::any::Any
-                    + ::std::marker::Send
-                    + 'static,
-                Self: wee_events::Handles<C>,
-            {
-                let id = id.clone();
-                let __type_id = ::std::any::TypeId::of::<C>();
-                // Box the command once so it can be downcast to a concrete type
-                // in the matching branch of the static if-chain below.
-                let __cmd_any: ::std::boxed::Box<dyn ::std::any::Any + ::std::marker::Send + 'static> =
-                    ::std::boxed::Box::new(cmd);
-
-                async move {
-                    let __ctx = (self.factory)().await?;
-                    let __entity = (self.loader)(::std::sync::Arc::clone(&__ctx), id).await?;
-
-                    // Generated static dispatch — one branch per registered command type.
-                    // No Vec scan: the compiler emits N TypeId comparisons (all constants).
-                    #(#dispatch_arms)*
-
-                    unreachable!(
-                        concat!(
-                            stringify!(#name),
-                            "::execute: no handler matched (Handles<C> guarantees C is \
-                             registered — this is a bug in the service! macro)"
-                        )
-                    )
-                }
-            }
         }
 
-        #(#handles_impls)*
-
-        #typed_service_impl
+        #(#dispatch_impls)*
     }
 }

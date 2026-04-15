@@ -4,9 +4,8 @@
 //!
 //! Provides a `ServiceBuilder<S>` that accumulates a loader function and typed
 //! handler functions. The `.build(factory)` method produces a `BuiltService`
-//! that has `load` and `execute` methods and implements `Handles<C>` for each
-//! registered command — all verified at compile time via a type-level handler
-//! list.
+//! that has `load` and `execute` methods. All dispatch is fully static —
+//! no type erasure, no `Box<dyn Any>`, no `TypeId`.
 //!
 //! ## Handler signature
 //!
@@ -24,18 +23,8 @@
 //!     .build(|| async { Ok(TestContext::default()) });
 //!
 //! let entity = service.load(&id).await?;
-//! let entity = service.execute(&id, Increment { amount: 2 }).await?;
+//! let entity = service.execute::<Increment, _>(&id, Increment { amount: 2 }).await?;
 //! ```
-//!
-//! ## TypedService compatibility
-//!
-//! `BuiltService` provides `load` and `execute` as inherent async methods with
-//! the same signatures as `TypedService<S>`. A blanket `TypedService` impl
-//! cannot be provided directly because Rust's trait-impl rules prohibit adding
-//! the `HandleCommand<C, Idx, Ctx, S>` bound in the trait method body.
-//!
-//! Macro-generated service structs (Task 3) can delegate to `BuiltService` and
-//! implement `TypedService` at that point.
 
 use std::future::Future;
 use std::marker::PhantomData;
@@ -46,149 +35,10 @@ use crate::id::AggregateId;
 use crate::Command;
 
 // ---------------------------------------------------------------------------
-// Erased future type alias
+// Erased future type alias — BoxFuture for lifetime management only, not type erasure
 // ---------------------------------------------------------------------------
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-// ---------------------------------------------------------------------------
-// Fully-erased types for macro-generated services
-//
-// Macro-generated services need a struct with no `Ctx` type parameter so that
-// `build` can be a normal method that constrains `Ctx` via inference from the
-// factory/loader/handler arguments.
-//
-// Both the context AND each command type are fully erased using `dyn Any`.
-// The concrete context is produced by the factory as a `Box<dyn Any + Send>`.
-// The loader and handlers downcast the context back to their concrete `Ctx`.
-//
-// This design adds a small allocation + dynamic dispatch overhead in exchange
-// for a clean, simple struct type with no unnameable generic parameters.
-// ---------------------------------------------------------------------------
-
-/// A factory that produces a reference-counted, fully type-erased context.
-///
-/// Using `Arc` allows the context to be cheaply shared between the loader
-/// and handler within a single `execute` call without requiring `Ctx: Clone`.
-pub type ErasedFactory = Box<
-    dyn Fn() -> BoxFuture<'static, crate::Result<std::sync::Arc<dyn std::any::Any + Send + Sync>>>
-        + Send
-        + Sync,
->;
-
-/// A type-erased loader that takes an `Arc`-wrapped context and an owned `AggregateId`.
-///
-/// Using `Arc` for the context and owned `AggregateId` lets the returned
-/// `BoxFuture<'static, ...>` own all its data, avoiding unsatisfiable lifetime
-/// constraints on the erased closure.
-pub type ErasedLoader<S> = Box<
-    dyn Fn(
-            std::sync::Arc<dyn std::any::Any + Send + Sync>,
-            AggregateId,
-        ) -> BoxFuture<'static, crate::Result<Entity<S>>>
-        + Send
-        + Sync,
->;
-
-
-/// Wraps a typed async factory into an `ErasedFactory`.
-///
-/// The produced context is wrapped in `Arc<dyn Any + Send + Sync>` so it can
-/// be cheaply shared between the loader and handler within a single `execute`.
-pub fn erase_factory<Ctx, F, Fut>(factory: F) -> ErasedFactory
-where
-    Ctx: std::any::Any + Send + Sync + 'static,
-    F: Fn() -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = crate::Result<Ctx>> + Send + 'static,
-{
-    use std::sync::Arc;
-    Box::new(move || {
-        let fut = factory();
-        Box::pin(async move {
-            let ctx: Ctx = fut.await?;
-            let arc: Arc<dyn std::any::Any + Send + Sync> = Arc::new(ctx);
-            Ok(arc)
-        })
-    })
-}
-
-/// Wraps a typed async loader function into an `ErasedLoader`.
-///
-/// Takes an `Arc`-wrapped erased context and an owned `AggregateId`. Inside
-/// an `async move` block (which owns all data), uses `LoaderBridge` to invoke
-/// the loader and await the result. The returned future is `'static` because
-/// it owns all the data it references.
-///
-/// Panics if the context type does not match `Ctx` — that would be a bug.
-pub fn erase_loader<Ctx, S, F>(loader: F) -> ErasedLoader<S>
-where
-    Ctx: std::any::Any + Send + Sync + 'static,
-    S: Send + Sync + 'static,
-    F: Send + Sync + 'static,
-    for<'a> &'a F: LoaderBridge<'a, Ctx, S>,
-{
-    use std::sync::Arc;
-    let loader = Arc::new(loader);
-    Box::new(
-        move |ctx_arc: Arc<dyn std::any::Any + Send + Sync>, id: AggregateId| {
-            let ctx: Arc<Ctx> = ctx_arc
-                .downcast::<Ctx>()
-                .expect("erase_loader: context type mismatch (this is a bug)");
-            let loader = Arc::clone(&loader);
-            Box::pin(
-                async move { <&F as LoaderBridge<'_, Ctx, S>>::call(&*loader, &*ctx, &id).await },
-            )
-        },
-    )
-}
-
-/// A type-erased command handler that takes an `Arc`-wrapped context, owned entity,
-/// and boxed command.
-///
-/// Used by macro-generated services to store per-command handlers without the
-/// command type `C` in the field type.
-pub type ErasedHandler<S> = Box<
-    dyn Fn(
-            std::sync::Arc<dyn std::any::Any + Send + Sync>,
-            Entity<S>,
-            Box<dyn std::any::Any + Send + 'static>,
-        ) -> BoxFuture<'static, crate::Result<Entity<S>>>
-        + Send
-        + Sync,
->;
-
-/// Wraps a typed async handler function into an `ErasedHandler`.
-///
-/// Uses `HandlerBridge` inside an `async move` block for the same reasons as
-/// `erase_loader`. All data is owned by the async block, making the future
-/// `'static`. Panics on type mismatch.
-pub fn erase_handler<Ctx, S, C, F>(handler: F) -> ErasedHandler<S>
-where
-    Ctx: std::any::Any + Send + Sync + 'static,
-    S: Send + Sync + 'static,
-    C: std::any::Any + Send + 'static,
-    F: Send + Sync + 'static,
-    for<'a> &'a F: HandlerBridge<'a, Ctx, S, C>,
-{
-    use std::sync::Arc;
-    let handler = Arc::new(handler);
-    Box::new(
-        move |ctx_arc: Arc<dyn std::any::Any + Send + Sync>,
-              entity: Entity<S>,
-              cmd_any: Box<dyn std::any::Any + Send + 'static>| {
-            let ctx: Arc<Ctx> = ctx_arc
-                .downcast::<Ctx>()
-                .expect("erase_handler: context type mismatch (this is a bug)");
-            let cmd = *cmd_any
-                .downcast::<C>()
-                .expect("erase_handler: command type mismatch (this is a bug)");
-            let handler = Arc::clone(&handler);
-            Box::pin(async move {
-                <&F as HandlerBridge<'_, Ctx, S, C>>::call(&*handler, &*ctx, &entity, cmd).await
-            })
-        },
-    )
-}
 
 // ---------------------------------------------------------------------------
 // HandlerBridge — lifetime-polymorphic glue.
@@ -243,6 +93,29 @@ where
 {
     fn call(f: Self, ctx: &'a Ctx, id: &'a AggregateId) -> BoxFuture<'a, crate::Result<Entity<S>>> {
         Box::pin(f(ctx, id))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FactoryBridge — same lifetime trick for the factory function.
+// ---------------------------------------------------------------------------
+
+/// Lifetime-polymorphic bridge for factory functions.
+///
+/// Used by macro-generated `DispatchCommand` impls and `TypedService::load`
+/// to call the factory without boxing the concrete closure type.
+#[doc(hidden)]
+pub trait FactoryBridge<'a, Ctx>: Sized {
+    fn call(f: Self) -> BoxFuture<'a, crate::Result<Ctx>>;
+}
+
+impl<'a, Ctx, F, Fut> FactoryBridge<'a, Ctx> for &'a F
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = crate::Result<Ctx>> + Send + 'a,
+{
+    fn call(f: Self) -> BoxFuture<'a, crate::Result<Ctx>> {
+        Box::pin(f())
     }
 }
 
@@ -336,41 +209,24 @@ where
     }
 }
 
-// Note: `BuiltService` does NOT implement the public `Handles<C>` trait
-// directly. A blanket impl would require an unconstrained `Idx` type parameter
-// (E0207). Instead, macro-generated wrapper types implement `Handles<C>` for
-// each concrete registered command.
-//
-// `BuiltService::execute` uses `HandleCommand<C, Idx, Ctx, S>` internally
-// as an inherent method bound — the `Idx` is inferred by the compiler and
-// never appears in the public API.
-
-// ---------------------------------------------------------------------------
-// Factory type alias — erases the concrete factory future type.
-// ---------------------------------------------------------------------------
-
-/// A boxed async factory that produces a fresh `Ctx` per call.
-///
-/// Erasing the future type here keeps `BuiltService`'s type signature clean.
-pub type Factory<Ctx> = Box<dyn Fn() -> BoxFuture<'static, crate::Result<Ctx>> + Send + Sync>;
-
 // ---------------------------------------------------------------------------
 // BuiltService
 // ---------------------------------------------------------------------------
 
 /// A compiled service produced by `ServiceBuilder::build`.
 ///
-/// - `load` and `execute` are inherent async methods.
-/// - `Handles<C>` is implemented for every command registered with
-///   `with_handler` — the compiler rejects `execute` calls with unregistered
-///   command types.
-/// - `Send + Sync` when `L` and `Handlers` are `Send + Sync`.
+/// - `load` is an inherent async method.
+/// - `execute<C, Idx>` is an inherent method for direct HList dispatch.
+/// - `TypedService<S>` is implemented via blanket impl.
+/// - `DispatchCommand<C>` (and thus `Handles<C>`) impls are generated by
+///   the `service!` macro for each registered command.
+/// - `Send + Sync` when `L`, `F`, and `Handlers` are `Send + Sync`.
 pub struct BuiltService<Ctx, S, L, F, Handlers> {
-    factory: F,
-    loader: L,
-    handlers: Handlers,
-    _ctx: PhantomData<fn() -> Ctx>,
-    _state: PhantomData<fn() -> S>,
+    pub factory: F,
+    pub loader: L,
+    pub handlers: Handlers,
+    pub _ctx: PhantomData<fn() -> Ctx>,
+    pub _state: PhantomData<fn() -> S>,
 }
 
 // SAFETY: `Ctx` and `S` appear only in `PhantomData<fn() -> T>`, which is
@@ -393,13 +249,15 @@ where
 {
 }
 
-impl<Ctx, S, L, Handlers> BuiltService<Ctx, S, L, Factory<Ctx>, Handlers>
+impl<Ctx, S, L, F, Handlers> BuiltService<Ctx, S, L, F, Handlers>
 where
     Ctx: Send + Sync + 'static,
     S: Send + Sync + 'static,
     L: Send + Sync + 'static,
+    F: Send + Sync + 'static,
     Handlers: Send + Sync + 'static,
     for<'a> &'a L: LoaderBridge<'a, Ctx, S>,
+    for<'a> &'a F: FactoryBridge<'a, Ctx>,
 {
     /// Load the current entity state for the given aggregate.
     ///
@@ -410,19 +268,19 @@ where
     ) -> impl Future<Output = crate::Result<Entity<S>>> + Send + '_ {
         let id = id.clone();
         async move {
-            let ctx = (self.factory)().await?;
+            let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory).await?;
             <&L as LoaderBridge<'_, Ctx, S>>::call(&self.loader, &ctx, &id).await
         }
     }
 
-    /// Execute a typed command against the aggregate.
+    /// Execute a typed command against the aggregate via direct HList dispatch.
     ///
     /// The `Idx` type parameter is an internal HList selector inferred by
-    /// the compiler — callers never specify it. `HandleCommand` is the
-    /// internal dispatch trait that routes to the correct handler.
+    /// the compiler — callers never specify it explicitly. This inherent method
+    /// is the escape hatch for direct use without the `service!` macro.
     ///
-    /// Macro-generated wrappers call this method and implement the public
-    /// `Handles<C>` + `TypedService<S>` traits for each concrete command.
+    /// Macro-generated code uses `DispatchCommand<C>::dispatch_command` instead,
+    /// which goes through `Handles<C>` for the public `TypedService::execute` path.
     pub fn execute<C, Idx>(
         &self,
         id: &AggregateId,
@@ -434,11 +292,45 @@ where
     {
         let id = id.clone();
         async move {
-            let ctx = (self.factory)().await?;
+            let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory).await?;
             let entity = <&L as LoaderBridge<'_, Ctx, S>>::call(&self.loader, &ctx, &id).await?;
             self.handlers.handle(&ctx, &entity, cmd).await
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// TypedService blanket impl for BuiltService
+// ---------------------------------------------------------------------------
+
+impl<Ctx, S, L, F, Handlers> crate::service::__private::ServiceState<S>
+    for BuiltService<Ctx, S, L, F, Handlers>
+where
+    L: Send + Sync,
+    F: Send + Sync,
+    Handlers: Send + Sync,
+{
+}
+
+impl<Ctx, S, L, F, Handlers> crate::TypedService<S>
+    for BuiltService<Ctx, S, L, F, Handlers>
+where
+    Ctx: Send + Sync + 'static,
+    S: Send + Sync + 'static,
+    L: Send + Sync + 'static,
+    F: Send + Sync + 'static,
+    Handlers: Send + Sync + 'static,
+    for<'a> &'a L: LoaderBridge<'a, Ctx, S>,
+    for<'a> &'a F: FactoryBridge<'a, Ctx>,
+{
+    fn load(&self, id: &AggregateId) -> impl Future<Output = crate::Result<Entity<S>>> + Send {
+        let id = id.clone();
+        async move {
+            let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory).await?;
+            <&L as LoaderBridge<'_, Ctx, S>>::call(&self.loader, &ctx, &id).await
+        }
+    }
+    // execute uses the default impl from TypedService — calls DispatchCommand<C>
 }
 
 // ---------------------------------------------------------------------------
@@ -510,17 +402,15 @@ impl<S, L, Handlers> ServiceBuilder<S, L, Handlers> {
     ///
     /// `factory` is an `async fn() -> crate::Result<Ctx>` called once per
     /// `load` or `execute` invocation to produce a fresh context. The concrete
-    /// future type is erased into a `Box<dyn Future>` so `BuiltService`'s type
-    /// stays ergonomic.
-    pub fn build<Ctx, F, Fut>(self, factory: F) -> BuiltService<Ctx, S, L, Factory<Ctx>, Handlers>
+    /// factory type is preserved — no type erasure.
+    pub fn build<Ctx, F, Fut>(self, factory: F) -> BuiltService<Ctx, S, L, F, Handlers>
     where
         Ctx: Send + Sync + 'static,
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = crate::Result<Ctx>> + Send + 'static,
     {
-        let boxed: Factory<Ctx> = Box::new(move || Box::pin(factory()));
         BuiltService {
-            factory: boxed,
+            factory,
             loader: self.loader,
             handlers: self.handlers,
             _ctx: PhantomData,
