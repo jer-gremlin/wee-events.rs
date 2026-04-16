@@ -1,3 +1,5 @@
+mod handler_attr;
+mod loader_attr;
 mod restate_service_macro;
 mod service_macro;
 
@@ -5,6 +7,49 @@ use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};
+
+/// Annotates a command handler function and emits a companion spec struct.
+///
+/// # Syntax
+///
+/// ```rust,ignore
+/// #[wee_events::handler(command = MyCommand, requires(HasSomeTrait))]
+/// pub async fn my_handler<R: HasSomeTrait>(
+///     env: &R,
+///     entity: &wee_events::Entity<MyState>,
+///     cmd: MyCommand,
+/// ) -> wee_events::Result<wee_events::Entity<MyState>> { ... }
+/// ```
+///
+/// Emits:
+/// - The original function, unchanged
+/// - `pub struct my_handler_Spec` implementing `wee_events::HandlerSpec`
+/// - `pub trait __my_handler_Requires` with a blanket impl
+#[proc_macro_attribute]
+pub fn handler(args: TokenStream, input: TokenStream) -> TokenStream {
+    handler_attr::expand(args, input)
+}
+
+/// Annotates a state loader function and emits a companion spec struct.
+///
+/// # Syntax
+///
+/// ```rust,ignore
+/// #[wee_events::loader(requires(HasStore))]
+/// pub async fn load_my_state<R: HasStore>(
+///     env: &R,
+///     id: &wee_events::AggregateId,
+/// ) -> wee_events::Result<wee_events::Entity<MyState>> { ... }
+/// ```
+///
+/// Emits:
+/// - The original function, unchanged
+/// - `pub struct load_my_state_Spec` implementing `wee_events::LoaderSpec`
+/// - `pub trait __load_my_state_Requires` with a blanket impl
+#[proc_macro_attribute]
+pub fn loader(args: TokenStream, input: TokenStream) -> TokenStream {
+    loader_attr::expand(args, input)
+}
 
 /// Derives the `Command` trait for an enum.
 ///
