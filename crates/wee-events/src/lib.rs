@@ -10,6 +10,7 @@ mod memory_store;
 mod renderer;
 mod service;
 mod service_builder;
+mod spec;
 mod store;
 
 #[cfg(any(test, feature = "testing"))]
@@ -40,7 +41,8 @@ pub use service_builder::{EmptyHandlers, Here, There};
 #[doc(hidden)]
 pub use service::__private;
 pub use store::{EventStore, PublishOptions, RawEvent};
-pub use wee_events_macros::{service, Command, DomainEvent};
+pub use spec::{HandlerSpec, LoaderSpec};
+pub use wee_events_macros::{handler, loader, service, Command, DomainEvent};
 
 pub mod memory {
     pub use crate::memory_store::{MemoryStore, MemoryStoreBacking};
