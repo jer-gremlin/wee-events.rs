@@ -154,11 +154,13 @@ impl Command for Increment {
 
 struct TypedCounterService;
 
-// Implement ServiceState<S> — phantom marker, required by DispatchCommand<C, S> supertrait
-impl wee_events::__private::ServiceState<Counter> for TypedCounterService {}
+// Implement ServiceState — associates the service with its state type
+impl wee_events::__private::ServiceState for TypedCounterService {
+    type State = Counter;
+}
 
-// Implement DispatchCommand<Increment, Counter> — required by Handles<Increment, Counter>
-impl wee_events::__private::DispatchCommand<Increment, Counter> for TypedCounterService {
+// Implement DispatchCommand<Increment> — required by Handles<Increment>
+impl wee_events::__private::DispatchCommand<Increment> for TypedCounterService {
     fn dispatch_command(
         &self,
         id: &AggregateId,
@@ -175,8 +177,8 @@ impl wee_events::__private::DispatchCommand<Increment, Counter> for TypedCounter
     }
 }
 
-// Handles<Increment, Counter> is satisfied because DispatchCommand<Increment, Counter> is implemented
-impl Handles<Increment, Counter> for TypedCounterService {}
+// Handles<Increment> is satisfied because DispatchCommand<Increment> is implemented
+impl Handles<Increment> for TypedCounterService {}
 
 impl TypedService<Counter> for TypedCounterService {
     fn load(
@@ -192,7 +194,7 @@ impl TypedService<Counter> for TypedCounterService {
             })
         }
     }
-    // execute() uses the default impl from TypedService which calls DispatchCommand
+    // execute() uses the default impl from TypedService which calls DispatchCommand<C>
 }
 
 #[tokio::test]

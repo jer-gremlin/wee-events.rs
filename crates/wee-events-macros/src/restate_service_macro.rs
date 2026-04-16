@@ -162,20 +162,23 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
 
     let cmd_types: Vec<&Path> = handler_entries.iter().map(|e| &e.command_type).collect();
 
-    // ServiceState<S> impl — phantom marker, avoids E0446 when state_type
-    // is a private type in user code.
+    // ServiceState impl — associates the client with its state type.
+    // The associated type approach avoids E0446 when state_type is private:
+    // associated type values in impl blocks may reference private types.
     let service_state_impl = quote! {
-        impl wee_events::__private::ServiceState<#state_type> for #client_name {}
+        impl wee_events::__private::ServiceState for #client_name {
+            type State = #state_type;
+        }
     };
 
-    // Per-command DispatchCommand<C, S> impls — required by Handles<C, S> supertrait.
+    // Per-command DispatchCommand<C> impls — required by Handles<C> supertrait.
     // The dispatch logic serializes and sends to the Restate ingress HTTP API.
     let dispatch_command_impls: Vec<TokenStream2> = handler_entries
         .iter()
         .map(|entry| {
             let cmd = &entry.command_type;
             quote! {
-                impl wee_events::__private::DispatchCommand<#cmd, #state_type> for #client_name {
+                impl wee_events::__private::DispatchCommand<#cmd> for #client_name {
                     fn dispatch_command(
                         &self,
                         id: &wee_events::AggregateId,
@@ -192,21 +195,21 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
         })
         .collect();
 
-    // `impl Handles<Cmd, State>` for each registered command.
-    // The DispatchCommand<C, S> supertrait is satisfied by the impl above.
+    // `impl Handles<Cmd>` for each registered command.
+    // The DispatchCommand<C> supertrait is satisfied by the impl above.
     let handles_impls: Vec<TokenStream2> = handler_entries
         .iter()
         .map(|entry| {
             let cmd = &entry.command_type;
             quote! {
-                impl wee_events::Handles<#cmd, #state_type> for #client_name {}
+                impl wee_events::Handles<#cmd> for #client_name {}
             }
         })
         .collect();
 
     // TypedService impl — delegates load to the inherent method.
     // The execute method uses the default impl from TypedService which calls
-    // DispatchCommand<C, S>::dispatch_command.
+    // DispatchCommand<C>::dispatch_command.
     let typed_service_impl = quote! {
         impl wee_events::TypedService<#state_type> for #client_name {
             fn load(
@@ -217,7 +220,7 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
             > + ::std::marker::Send + '_ {
                 #client_name::load(self, id)
             }
-            // execute uses the default impl from TypedService which calls DispatchCommand<C, S>
+            // execute uses the default impl from TypedService which calls DispatchCommand<C>
         }
     };
 
@@ -269,7 +272,7 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
             ) -> wee_events::Result<wee_events::Entity<#state_type>>
             where
                 Svc: wee_events::TypedService<#state_type>
-                    #(+ wee_events::Handles<#cmd_types, #state_type>)*,
+                    #(+ wee_events::Handles<#cmd_types>)*,
             {
                 #(#dispatch_arms)*
 
@@ -348,7 +351,7 @@ fn generate(service: RestateServiceInput) -> TokenStream2 {
             > + ::std::marker::Send + '_
             where
                 C: wee_events::Command + ::std::marker::Send + 'static,
-                Self: wee_events::Handles<C, #state_type>,
+                Self: wee_events::Handles<C>,
             {
                 let id = id.clone();
                 let ingress_url = self.ingress_url.clone();

@@ -24,11 +24,13 @@ struct Counter {
 
 struct TestService;
 
-// Implement ServiceState<Counter> — phantom marker
-impl wee_events::__private::ServiceState<Counter> for TestService {}
+// Implement ServiceState — associates the service with its state type
+impl wee_events::__private::ServiceState for TestService {
+    type State = Counter;
+}
 
-// Implement DispatchCommand<Increment, Counter> — required by Handles<Increment, Counter>
-impl wee_events::__private::DispatchCommand<Increment, Counter> for TestService {
+// Implement DispatchCommand<Increment> — required by Handles<Increment>
+impl wee_events::__private::DispatchCommand<Increment> for TestService {
     fn dispatch_command(
         &self,
         id: &AggregateId,
@@ -45,7 +47,7 @@ impl wee_events::__private::DispatchCommand<Increment, Counter> for TestService 
     }
 }
 
-impl Handles<Increment, Counter> for TestService {}
+impl Handles<Increment> for TestService {}
 
 impl TypedService<Counter> for TestService {
     fn load(

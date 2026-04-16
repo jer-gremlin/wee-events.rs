@@ -1,4 +1,17 @@
+//! Tests for the rewritten `service!` macro.
+
+#![allow(dead_code)]
+//!
+//! Handlers and loaders are annotated with `#[handler]`/`#[loader]` and are
+//! generic over a context type `R`. The `service!` macro consumes bare function
+//! names and derives the command types and capability requirements from the
+//! companion `HandlerSpec`/`LoaderSpec` items.
+
 use wee_events::{AggregateId, Command, Entity, Handles, Revision, TypedService};
+
+// ---------------------------------------------------------------------------
+// Domain model
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Default, Clone)]
 struct Counter {
@@ -21,10 +34,27 @@ impl Command for Adjust {
     const NAME: &'static str = "counter:adjust";
 }
 
-#[derive(Default, Clone)]
-struct TestContext;
+// ---------------------------------------------------------------------------
+// Capability traits
+// ---------------------------------------------------------------------------
 
-async fn load_counter(_ctx: &TestContext, id: &AggregateId) -> wee_events::Result<Entity<Counter>> {
+trait HasStore: Send + Sync + 'static {
+    fn store_info(&self) -> &str;
+}
+
+trait HasRandomSource: Send + Sync + 'static {
+    fn random_bonus(&self) -> i64;
+}
+
+// ---------------------------------------------------------------------------
+// Annotated loader and handlers — generic over R
+// ---------------------------------------------------------------------------
+
+#[wee_events::loader(requires(HasStore))]
+async fn load_counter<R: HasStore>(
+    _env: &R,
+    id: &AggregateId,
+) -> wee_events::Result<Entity<Counter>> {
     Ok(Entity {
         aggregate_id: id.clone(),
         revision: Revision::zero(),
@@ -32,105 +62,117 @@ async fn load_counter(_ctx: &TestContext, id: &AggregateId) -> wee_events::Resul
     })
 }
 
-async fn increment(
-    _ctx: &TestContext,
-    _entity: &Entity<Counter>,
+#[wee_events::handler(command = Increment, requires(HasRandomSource))]
+async fn increment<R: HasRandomSource>(
+    env: &R,
+    entity: &Entity<Counter>,
     cmd: Increment,
 ) -> wee_events::Result<Entity<Counter>> {
     Ok(Entity {
-        aggregate_id: "counter:test".parse().unwrap(),
-        revision: Revision::zero(),
-        state: Counter { value: cmd.amount },
+        aggregate_id: entity.aggregate_id.clone(),
+        revision: entity.revision.clone(),
+        state: Counter {
+            value: entity.state.value + cmd.amount + env.random_bonus(),
+        },
     })
 }
 
-async fn adjust(
-    _ctx: &TestContext,
+#[wee_events::handler(command = Adjust, requires(HasRandomSource))]
+async fn adjust<R: HasRandomSource>(
+    _env: &R,
     entity: &Entity<Counter>,
     _cmd: Adjust,
 ) -> wee_events::Result<Entity<Counter>> {
     Ok(entity.clone())
 }
 
+// ---------------------------------------------------------------------------
+// Service declaration — new syntax: bare function names
+// ---------------------------------------------------------------------------
+
 wee_events::service! {
     pub CounterService for Counter {
         loader: load_counter,
-        handlers: [
-            Increment => increment,
-            Adjust => adjust,
-        ],
+        handlers: [increment, adjust],
     }
 }
 
+// ---------------------------------------------------------------------------
+// Concrete context satisfying CounterServiceEnv
+// ---------------------------------------------------------------------------
+
+struct AppCtx;
+
+impl HasStore for AppCtx {
+    fn store_info(&self) -> &str {
+        "in-memory"
+    }
+}
+
+impl HasRandomSource for AppCtx {
+    fn random_bonus(&self) -> i64 {
+        5
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[tokio::test]
-async fn generated_service_builds_and_executes() {
-    let service = CounterService::build(
-        || async { Ok(TestContext) },
-        load_counter,
-        increment,
-        adjust,
-    );
+async fn portable_service_executes_handler() {
+    let service = CounterService::portable(|| async { Ok(AppCtx) });
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = service.execute(&id, Increment { amount: 3 }).await.unwrap();
-    assert_eq!(entity.state.value, 3);
+    // amount 3 + bonus 5 = 8
+    assert_eq!(entity.state.value, 8);
 }
 
 #[tokio::test]
-async fn generated_service_handles_multiple_commands() {
-    let service = CounterService::build(
-        || async { Ok(TestContext) },
-        load_counter,
-        increment,
-        adjust,
-    );
-    let id: AggregateId = "counter:c1".parse().unwrap();
-    let _ = service.execute(&id, Increment { amount: 3 }).await.unwrap();
-    let _ = service.execute(&id, Adjust).await.unwrap();
-}
-
-#[tokio::test]
-async fn generated_service_loads() {
-    let service = CounterService::build(
-        || async { Ok(TestContext) },
-        load_counter,
-        increment,
-        adjust,
-    );
+async fn portable_service_loads() {
+    let service = CounterService::portable(|| async { Ok(AppCtx) });
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = service.load(&id).await.unwrap();
     assert_eq!(entity.state.value, 0);
 }
 
-// ---------------------------------------------------------------------------
-// Shared-caller pattern
-// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn portable_service_handles_multiple_commands() {
+    let service = CounterService::portable(|| async { Ok(AppCtx) });
+    let id: AggregateId = "counter:c1".parse().unwrap();
+    // increment: 3 + 5 = 8
+    let entity = service.execute(&id, Increment { amount: 3 }).await.unwrap();
+    assert_eq!(entity.state.value, 8);
+    // adjust is a no-op (returns entity unchanged)
+    let entity = service.execute(&id, Adjust).await.unwrap();
+    assert_eq!(entity.state.value, 0); // loader always returns default state
+}
 
 /// A function that accepts any `TypedService<Counter>` implementation and
 /// exercises both commands. This is the "shared caller" pattern — the same
-/// business logic works whether it is given a local service or a remote client.
-async fn shared_caller<T>(svc: &T, id: &AggregateId) -> wee_events::Result<Entity<Counter>>
+/// business logic works whether given a local service or a remote client.
+async fn caller<T>(svc: &T, id: &AggregateId) -> wee_events::Result<Entity<Counter>>
 where
-    T: TypedService<Counter> + Handles<Increment, Counter> + Handles<Adjust, Counter>,
+    T: TypedService<Counter> + Handles<Increment> + Handles<Adjust>,
 {
-    let entity = svc.execute(id, Increment { amount: 10 }).await?;
-    // Adjust is a no-op in this test implementation; it returns the entity as-is.
-    let _ = entity;
+    let _ = svc.execute(id, Increment { amount: 1 }).await?;
     svc.execute(id, Adjust).await
 }
 
-/// Verify that the `service!`-generated struct satisfies `TypedService<Counter>`
-/// and can be passed to the shared-caller helper.
 #[tokio::test]
-async fn shared_caller_works_with_service_macro() {
-    let service = CounterService::build(
-        || async { Ok(TestContext) },
-        load_counter,
-        increment,
-        adjust,
-    );
+async fn shared_caller_pattern() {
+    let service = CounterService::portable(|| async { Ok(AppCtx) });
     let id: AggregateId = "counter:c1".parse().unwrap();
-    let entity = shared_caller(&service, &id).await.unwrap();
-    // Adjust returns the entity as loaded (Counter { value: 0 }) since the
-    // test loader always returns the default state.
-    assert_eq!(entity.state.value, 0);
+    // Increment(1) + bonus(5) = 6, then Adjust is a no-op.
+    // The loader always returns default (value: 0) so the Adjust call loads
+    // fresh state with value 0.
+    let entity = caller(&service, &id).await.unwrap();
+    assert_eq!(entity.state.value, 0); // loader returns default, adjust is no-op
+}
+
+#[test]
+fn env_trait_is_generated() {
+    // Any type satisfying the underlying capability traits satisfies CounterServiceEnv
+    fn assert_env<T: CounterServiceEnv>() {}
+    assert_env::<AppCtx>();
 }

@@ -15,7 +15,7 @@ use wee_events::{AggregateId, Command};
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
-struct Counter {
+pub struct Counter {
     value: i64,
 }
 
@@ -57,8 +57,8 @@ wee_events_restate::restate_service! {
 fn assert_typed_service<T>(_: &T)
 where
     T: wee_events::TypedService<Counter>
-        + wee_events::Handles<Increment, Counter>
-        + wee_events::Handles<Adjust, Counter>,
+        + wee_events::Handles<Increment>
+        + wee_events::Handles<Adjust>,
 {
 }
 

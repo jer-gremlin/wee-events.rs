@@ -303,35 +303,23 @@ where
 // TypedService blanket impl for BuiltService
 // ---------------------------------------------------------------------------
 
-impl<Ctx, S, L, F, Handlers> crate::service::__private::ServiceState<S>
+impl<Ctx, S, L, F, Handlers> crate::service::__private::ServiceState
     for BuiltService<Ctx, S, L, F, Handlers>
 where
+    S: Send + Sync,
     L: Send + Sync,
     F: Send + Sync,
     Handlers: Send + Sync,
 {
+    type State = S;
 }
 
-impl<Ctx, S, L, F, Handlers> crate::TypedService<S>
-    for BuiltService<Ctx, S, L, F, Handlers>
-where
-    Ctx: Send + Sync + 'static,
-    S: Send + Sync + 'static,
-    L: Send + Sync + 'static,
-    F: Send + Sync + 'static,
-    Handlers: Send + Sync + 'static,
-    for<'a> &'a L: LoaderBridge<'a, Ctx, S>,
-    for<'a> &'a F: FactoryBridge<'a, Ctx>,
-{
-    fn load(&self, id: &AggregateId) -> impl Future<Output = crate::Result<Entity<S>>> + Send {
-        let id = id.clone();
-        async move {
-            let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory).await?;
-            <&L as LoaderBridge<'_, Ctx, S>>::call(&self.loader, &ctx, &id).await
-        }
-    }
-    // execute uses the default impl from TypedService — calls DispatchCommand<C>
-}
+// Note: TypedService<S> is NOT blanket-implemented on BuiltService here.
+// The `service!` macro generates the TypedService impl per service because
+// the `load` body requires `FactoryBridge` + `LoaderBridge` bounds that
+// depend on the concrete Ctx inferred from the factory closure. A blanket
+// impl with generic Ctx cannot satisfy `impl Trait` return type checking
+// when the function bakes in a concrete loader.
 
 // ---------------------------------------------------------------------------
 // ServiceBuilder

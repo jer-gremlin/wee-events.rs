@@ -247,8 +247,12 @@ pub fn restate_service(input: TokenStream) -> TokenStream {
     restate_service_macro::expand(input)
 }
 
-/// Generates a service struct with a `build(factory)` method that wires up
-/// `ServiceBuilder` and produces a type-safe service for the given aggregate.
+/// Generates a service environment trait and namespace struct from
+/// `#[handler]`/`#[loader]`-annotated functions.
+///
+/// The `handlers` list contains bare function names; command types and
+/// capability requirements are derived from the companion `HandlerSpec`/
+/// `LoaderSpec` items emitted by the attribute macros.
 ///
 /// # Syntax
 ///
@@ -256,23 +260,22 @@ pub fn restate_service(input: TokenStream) -> TokenStream {
 /// wee_events::service! {
 ///     pub CounterService for Counter {
 ///         loader: load_counter,
-///         handlers: [
-///             Increment => increment,
-///             Adjust    => adjust,
-///         ],
+///         handlers: [increment, adjust],
 ///     }
 /// }
 /// ```
 ///
 /// # Generated items
 ///
-/// - `pub struct CounterService` — fully type-erased service struct (no generic parameters)
-/// - `CounterService::build(factory) -> CounterService` — constructor
-/// - `CounterService::load(&self, id) -> impl Future<..>`
-/// - `CounterService::execute<C>(&self, id, cmd) -> impl Future<..>`
-///   (requires `Self: Handles<C>` — satisfied by the registered commands)
-/// - `impl Handles<Increment> for CounterService` for each command
-/// - `impl TypedService<Counter> for CounterService`
+/// - `pub trait CounterServiceEnv` — union of all capability requirements;
+///   any type satisfying the constituent traits satisfies this trait via
+///   a blanket impl
+/// - `pub struct CounterService` — service namespace (zero-size)
+/// - `CounterService::portable(factory)` — builds a portable in-process
+///   service parameterised over an environment `R: CounterServiceEnv`
+/// - `impl DispatchCommand<C>` + `impl Handles<C>` on `BuiltService` for
+///   each registered command
+/// - `impl TypedService<Counter>` on `BuiltService`
 #[proc_macro]
 pub fn service(input: TokenStream) -> TokenStream {
     service_macro::expand(input)

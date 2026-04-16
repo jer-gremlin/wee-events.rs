@@ -85,51 +85,54 @@ pub mod __private {
     use super::*;
     use core::future::Future;
 
-    /// Phantom marker trait that associates a service with its state type `S`.
+    /// Marker trait that associates a service with its state type via an
+    /// associated type.
     ///
-    /// Using `S` as a type parameter (not an associated type) avoids `E0446`
-    /// ("private type in public interface") when the state type is private in
-    /// user code. The impl `impl ServiceState<PrivateState> for PubService {}` is
-    /// always valid regardless of `PrivateState`'s visibility.
-    pub trait ServiceState<S>: Send + Sync {}
+    /// Using an associated type rather than a type parameter keeps the public
+    /// `Handles<C>` trait single-parameter. The impl
+    /// `impl ServiceState for PubService { type State = PrivateState; }` is
+    /// always valid regardless of `PrivateState`'s visibility — associated type
+    /// values in impl blocks may reference private types.
+    pub trait ServiceState: Send + Sync {
+        type State;
+    }
 
-    /// Carries the compile-time dispatch witness for command `C` with state `S`.
+    /// Carries the compile-time dispatch witness for command `C`.
     ///
-    /// Implemented per concrete command by the `service!` macro with the
-    /// specific `Idx` type computed from the handler registration order.
-    /// The `Handles<C, S>: DispatchCommand<C, S>` supertrait relationship means
-    /// the compiler can call this when `Self: Handles<C, S>`.
-    pub trait DispatchCommand<C, S>: ServiceState<S> + Send + Sync {
+    /// `S` is recovered through `Self::State` from the `ServiceState` supertrait,
+    /// so callers only need one type parameter. Implemented per concrete command
+    /// by the `service!` macro with the specific `Idx` type computed from the
+    /// handler registration order.
+    pub trait DispatchCommand<C>: ServiceState + Send + Sync {
         fn dispatch_command(
             &self,
             id: &AggregateId,
             cmd: C,
-        ) -> impl Future<Output = crate::Result<Entity<S>>> + Send;
+        ) -> impl Future<Output = crate::Result<Entity<Self::State>>> + Send;
     }
 }
 
-/// Marker supertrait declaring that a service can handle command type `C`
-/// for state type `S`.
+/// Marker supertrait declaring that a service can handle command type `C`.
 ///
-/// The `__private::DispatchCommand<C, S>` supertrait carries the actual
-/// dispatch implementation. Callers only see `Handles<C, S>`; the dispatch
-/// details are hidden.
+/// The `__private::DispatchCommand<C>` supertrait carries the actual dispatch
+/// implementation. Callers only see `Handles<C>` — a single type parameter.
 ///
-/// Implement via `service!` macro (which generates the concrete `DispatchCommand`
-/// impl) or manually by implementing both `DispatchCommand<C, S>` and `Handles<C, S>`.
-pub trait Handles<C, S>: __private::DispatchCommand<C, S> {}
+/// Implement via the `service!` macro (which generates the concrete
+/// `DispatchCommand<C>` impl) or manually by implementing both
+/// `ServiceState`, `DispatchCommand<C>`, and `Handles<C>`.
+pub trait Handles<C>: __private::DispatchCommand<C> {}
 
 /// A typed service contract combining state loading with type-safe command dispatch.
 ///
 /// Unlike `Service<S>` (which takes untyped JSON), `TypedService<S>` dispatches
-/// over concrete command types. The `Handles<C, S>` bound on `execute` ensures
+/// over concrete command types. The `Handles<C>` bound on `execute` ensures
 /// only registered commands can be dispatched — unregistered commands produce a
 /// compile error rather than a runtime rejection.
 ///
 /// The trait is transport-agnostic: no `Serialize`, `Deserialize`, or
 /// transport-specific bounds appear here. Serialization is an adapter concern
 /// handled by generated macro code.
-pub trait TypedService<S>: Send + Sync {
+pub trait TypedService<S>: __private::ServiceState<State = S> + Send + Sync {
     fn load(
         &self,
         id: &AggregateId,
@@ -142,8 +145,8 @@ pub trait TypedService<S>: Send + Sync {
     ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send
     where
         C: crate::Command + Send + 'static,
-        Self: Handles<C, S>,
+        Self: Handles<C>,
     {
-        __private::DispatchCommand::<C, S>::dispatch_command(self, id, cmd)
+        __private::DispatchCommand::<C>::dispatch_command(self, id, cmd)
     }
 }
