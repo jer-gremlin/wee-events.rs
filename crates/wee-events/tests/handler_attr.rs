@@ -1,5 +1,7 @@
 //! Tests that #[handler] and #[loader] emit the expected companion items.
 
+#![allow(dead_code)]
+
 use wee_events::{AggregateId, Command, Entity, HandlerSpec, LoaderSpec, Revision};
 
 // Trivial state and command
