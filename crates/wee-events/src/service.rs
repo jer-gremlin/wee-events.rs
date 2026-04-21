@@ -150,3 +150,16 @@ pub trait TypedService<S>: __private::ServiceState<State = S> + Send + Sync {
         __private::DispatchCommand::<C>::dispatch_command(self, id, cmd)
     }
 }
+
+/// Defines the identity and state type of a service.
+///
+/// This trait links a service marker type to its aggregate state and a human-readable
+/// service name. It is the minimal contract for service definitions.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a service definition",
+    note = "use the `service!` macro to generate a ServiceDefinition impl",
+)]
+pub trait ServiceDefinition: Send + Sync + 'static {
+    type State;
+    const SERVICE_NAME: &'static str;
+}
