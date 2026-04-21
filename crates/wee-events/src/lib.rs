@@ -30,7 +30,7 @@ pub use id::{
     EventType, Revision,
 };
 pub use renderer::{ReduceFn, Renderer};
-pub use service::{CommandExecutor, EntityLoader, Handles, Rejection, Service, TypedService};
+pub use service::{CommandExecutor, EntityLoader, Handles, Rejection, Service, ServiceDefinition, TypedService};
 pub use service_builder::{BuiltService, ServiceBuilder};
 #[doc(hidden)]
 pub use service_builder::{
