@@ -237,8 +237,6 @@ fn generate_definition_only(input: DefinitionOnlyInput) -> TokenStream2 {
 
     let service_name_lit = LitStr::new(&service_name, proc_macro2::Span::call_site());
 
-    // TODO(Task 5): emit restate_client helper once RestateClient<D> exists
-
     quote! {
         /// Service definition for #name.
         ///
@@ -251,6 +249,14 @@ fn generate_definition_only(input: DefinitionOnlyInput) -> TokenStream2 {
         }
 
         #( impl ::wee_events::HasCommand<#commands> for #name {} )*
+
+        impl #name {
+            pub fn restate_client(
+                ingress: impl Into<String>,
+            ) -> ::wee_events_restate::RestateClient<Self> {
+                ::wee_events_restate::RestateClient::new(ingress)
+            }
+        }
     }
 }
 
@@ -494,7 +500,13 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                 for #name {}
         )*
 
-        // TODO(Task 5): emit restate_client helper once RestateClient<D> exists
+        impl #name {
+            pub fn restate_client(
+                ingress: impl Into<String>,
+            ) -> ::wee_events_restate::RestateClient<Self> {
+                ::wee_events_restate::RestateClient::new(ingress)
+            }
+        }
     };
 
     quote! {

@@ -1,35 +1,33 @@
 use std::marker::PhantomData;
 
-use wee_events::{AggregateId, CommandName, Entity, Rejection};
+use serde::de::DeserializeOwned;
+use wee_events::{AggregateId, CommandName, Entity, Rejection, ServiceDefinition};
 
 use crate::names;
-use crate::types::{CommandRequest, EntityResponse, ExecuteRequest, Metadata};
+use crate::types::{CommandRequest, ExecuteRequest, Metadata};
 
-/// Restate-backed service client implementing `EntityLoader<S>` + `CommandExecutor<S>`
-/// by calling the executor workflow and loader service over the Restate ingress HTTP API.
-pub struct RestateClient<S> {
+/// Restate-backed service client, generic over a service definition `D`.
+///
+/// Implements `TypedService<D::State>` and `Handles<C>` for every command `C`
+/// that `D` declares via `HasCommand<C>`. No per-service codegen is needed —
+/// a single blanket impl covers all definitions.
+pub struct RestateClient<D: ServiceDefinition> {
     http: reqwest::Client,
     ingress_url: String,
-    service_name: String,
-    _state: PhantomData<S>,
+    _def: PhantomData<fn() -> D>,
 }
 
-impl<S> RestateClient<S> {
-    pub fn new(ingress_url: impl Into<String>, service_name: impl Into<String>) -> Self {
+impl<D: ServiceDefinition> RestateClient<D> {
+    pub fn new(ingress_url: impl Into<String>) -> Self {
         Self {
             http: reqwest::Client::new(),
             ingress_url: ingress_url.into(),
-            service_name: service_name.into(),
-            _state: PhantomData,
+            _def: PhantomData,
         }
     }
 
-    fn executor_name(&self) -> String {
-        names::executor_name(&self.service_name)
-    }
-
-    fn loader_name(&self) -> String {
-        names::loader_name(&self.service_name)
+    fn executor_name() -> String {
+        names::executor_name(D::SERVICE_NAME)
     }
 
     fn encode_key(target: &AggregateId) -> String {
@@ -52,9 +50,9 @@ impl<S> RestateClient<S> {
         target: &AggregateId,
         command: serde_json::Value,
         idempotency_key: impl Into<String>,
-    ) -> wee_events::Result<Entity<S>>
+    ) -> wee_events::Result<Entity<D::State>>
     where
-        S: serde::de::DeserializeOwned,
+        D::State: DeserializeOwned,
     {
         let idempotency_key = idempotency_key.into();
         let correlation_id = Self::generate_correlation_id(target, name);
@@ -76,7 +74,7 @@ impl<S> RestateClient<S> {
         let url = format!(
             "{}/{}/{}/run",
             self.ingress_url,
-            self.executor_name(),
+            Self::executor_name(),
             idempotency_key,
         );
 
@@ -103,12 +101,12 @@ impl<S> RestateClient<S> {
             return Err(wee_events::Error::Store(text.into()));
         }
 
-        let exec_resp: EntityResponse = resp
+        let exec_resp: crate::types::EntityResponse = resp
             .json()
             .await
             .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
 
-        let state: S = serde_json::from_value(exec_resp.state)?;
+        let state: D::State = serde_json::from_value(exec_resp.state)?;
         Ok(Entity {
             aggregate_id: exec_resp.aggregate,
             revision: exec_resp.revision,
@@ -117,107 +115,66 @@ impl<S> RestateClient<S> {
     }
 }
 
-impl<S> wee_events::EntityLoader<S> for RestateClient<S>
-where
-    S: serde::de::DeserializeOwned + Send + Sync,
-{
-    async fn load(&self, id: &AggregateId) -> wee_events::Result<Entity<S>> {
-        let url = format!("{}/{}/load", self.ingress_url, self.loader_name());
-
-        let resp = self
-            .http
-            .post(&url)
-            .json(id)
-            .send()
-            .await
-            .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(wee_events::Error::Store(text.into()));
+impl<D: ServiceDefinition> Clone for RestateClient<D> {
+    fn clone(&self) -> Self {
+        Self {
+            http: self.http.clone(),
+            ingress_url: self.ingress_url.clone(),
+            _def: PhantomData::<fn() -> D>,
         }
-
-        let exec_resp: EntityResponse = resp
-            .json()
-            .await
-            .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
-
-        let state: S = serde_json::from_value(exec_resp.state)?;
-        Ok(Entity {
-            aggregate_id: exec_resp.aggregate,
-            revision: exec_resp.revision,
-            state,
-        })
     }
 }
 
-impl<S> wee_events::CommandExecutor<S> for RestateClient<S>
+// ---------------------------------------------------------------------------
+// Private trait impls required for TypedService / Handles
+// ---------------------------------------------------------------------------
+
+impl<D: ServiceDefinition> wee_events::__private::ServiceState for RestateClient<D> {
+    type State = D::State;
+}
+
+impl<D, C> wee_events::__private::DispatchCommand<C> for RestateClient<D>
 where
-    S: serde::de::DeserializeOwned + Send + Sync,
+    D: ServiceDefinition + wee_events::HasCommand<C>,
+    C: wee_events::Command + serde::Serialize + Send + 'static,
+    D::State: DeserializeOwned + Send + 'static,
 {
-    async fn execute(
+    async fn dispatch_command(
         &self,
-        name: &CommandName,
-        target: &AggregateId,
-        command: serde_json::Value,
-    ) -> wee_events::Result<Entity<S>> {
-        let correlation_id = Self::generate_correlation_id(target, name);
+        id: &AggregateId,
+        cmd: C,
+    ) -> wee_events::Result<Entity<D::State>> {
+        let http = self.http.clone();
+        let url = self.ingress_url.clone();
+        let value = serde_json::to_value(&cmd)?;
+        crate::generated::execute::<D::State>(
+            &http,
+            &url,
+            D::SERVICE_NAME,
+            id.clone(),
+            C::NAME.into(),
+            value,
+        )
+        .await
+    }
+}
 
-        let request = ExecuteRequest {
-            command: CommandRequest {
-                name: name.clone(),
-                target: target.clone(),
-                command,
-            },
-            metadata: Metadata {
-                correlation_id: correlation_id.clone(),
-                causation_id: None,
-                idempotency_key: None,
-            },
-        };
+impl<D, C> wee_events::Handles<C> for RestateClient<D>
+where
+    D: ServiceDefinition,
+    Self: wee_events::__private::DispatchCommand<C>,
+    C: wee_events::Command,
+{
+}
 
-        let url = format!(
-            "{}/{}/{}/run",
-            self.ingress_url,
-            self.executor_name(),
-            correlation_id,
-        );
-
-        let resp = self
-            .http
-            .post(&url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            // Try to parse as a Rejection from the terminal error payload
-            if let Ok(rejection) = serde_json::from_str::<Rejection>(&text) {
-                return Err(wee_events::Error::Rejection(rejection));
-            }
-            // Try the Restate error envelope (message field contains the JSON)
-            if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
-                if let Some(message) = envelope.get("message").and_then(|m| m.as_str()) {
-                    if let Ok(rejection) = serde_json::from_str::<Rejection>(message) {
-                        return Err(wee_events::Error::Rejection(rejection));
-                    }
-                }
-            }
-            return Err(wee_events::Error::Store(text.into()));
-        }
-
-        let exec_resp: EntityResponse = resp
-            .json()
-            .await
-            .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
-
-        let state: S = serde_json::from_value(exec_resp.state)?;
-        Ok(Entity {
-            aggregate_id: exec_resp.aggregate,
-            revision: exec_resp.revision,
-            state,
-        })
+impl<D> wee_events::TypedService<D::State> for RestateClient<D>
+where
+    D: ServiceDefinition,
+    D::State: DeserializeOwned + Send + 'static,
+{
+    async fn load(&self, id: &AggregateId) -> wee_events::Result<Entity<D::State>> {
+        let http = self.http.clone();
+        let url = self.ingress_url.clone();
+        crate::generated::load::<D::State>(&http, &url, D::SERVICE_NAME, id.clone()).await
     }
 }
