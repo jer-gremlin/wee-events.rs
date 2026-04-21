@@ -18,5 +18,3 @@ pub use loader::LoadHandler;
 pub use names::{executor_name, loader_name, runner_name};
 pub use service::{JsonService, ServiceAdapter, ServiceResponse};
 pub use types::{CommandRequest, EntityResponse, ExecuteNotification, ExecuteRequest, Metadata};
-
-pub use wee_events_macros::restate_service;
