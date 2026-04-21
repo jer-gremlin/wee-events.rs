@@ -1,6 +1,5 @@
 mod handler_attr;
 mod loader_attr;
-mod restate_service_macro;
 mod service_macro;
 
 use convert_case::{Case, Casing};
@@ -213,38 +212,6 @@ fn extract_prefix(input: &DeriveInput, attr_name: &str) -> syn::Result<String> {
         .strip_suffix(&format!("-{attr_name}"))
         .unwrap_or(&raw)
         .to_string())
-}
-
-/// Generates a typed Restate ingress client for the given aggregate service.
-///
-/// The generated `{Name}Client` struct connects to the Restate ingress HTTP
-/// API and dispatches `load` / `execute` calls to the appropriate Restate
-/// services. The `execute` method requires `Self: Handles<C, Idx>` so the
-/// compiler rejects calls with command types not listed in the macro.
-///
-/// # Syntax
-///
-/// ```rust,ignore
-/// wee_events_restate::restate_service! {
-///     pub CounterService for Counter {
-///         handlers: [
-///             Increment => increment,
-///             Adjust    => adjust,
-///         ],
-///     }
-/// }
-/// ```
-///
-/// # Generated items
-///
-/// - `pub struct CounterServiceClient` — holds `reqwest::Client`, ingress URL, and service name
-/// - `CounterServiceClient::new(ingress_url, service_name)` — constructor
-/// - `CounterServiceClient::load(&self, id) -> impl Future<..>`
-/// - `CounterServiceClient::execute<C>(&self, id, cmd) -> impl Future<..>`
-/// - `impl Handles<Increment> for CounterServiceClient` for each command
-#[proc_macro]
-pub fn restate_service(input: TokenStream) -> TokenStream {
-    restate_service_macro::expand(input)
 }
 
 /// Generates a service environment trait and namespace struct from
