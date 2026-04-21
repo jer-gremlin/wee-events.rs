@@ -5,7 +5,7 @@ use syn::{
     braced, bracketed,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Ident, Path, Token, Visibility,
+    Ident, LitStr, Path, Token, Visibility,
 };
 
 // ---------------------------------------------------------------------------
@@ -32,14 +32,99 @@ impl Parse for HandlerEntry {
     }
 }
 
-/// The full macro input:
-/// ```text
-/// pub ServiceName for StateType {
-///     loader: load_fn,
-///     handlers: [handler_a, handler_b],
-/// }
-/// ```
-struct ServiceInput {
+/// The two forms accepted by `service!`:
+///
+/// - **DefinitionOnly**: `pub Name("logical") for State [Cmd, ...]`
+///   Emits only `ServiceDefinition` + `HasCommand<C>` impls.
+///
+/// - **Full**: `pub Name for State { loader: .., handlers: [..] }`
+///   Emits the env trait, portable constructor, and dispatch impls.
+enum ServiceInput {
+    DefinitionOnly(DefinitionOnlyInput),
+    Full(FullServiceInput),
+}
+
+impl Parse for ServiceInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let vis: Visibility = input.parse()?;
+        let name: Ident = input.parse()?;
+
+        // Optional logical name literal: `("some-name")`
+        let logical_name: Option<LitStr> = if input.peek(syn::token::Paren) {
+            let inner;
+            syn::parenthesized!(inner in input);
+            Some(inner.parse::<LitStr>()?)
+        } else {
+            None
+        };
+
+        let _for: Token![for] = input.parse()?;
+        let state_type: Path = input.parse()?;
+
+        // Distinguish the two forms by what follows the state type.
+        if input.peek(syn::token::Bracket) {
+            // Definition-only: [ Cmd, ... ]
+            let cmds_buf;
+            bracketed!(cmds_buf in input);
+            let commands: Punctuated<Path, Token![,]> =
+                cmds_buf.parse_terminated(Path::parse, Token![,])?;
+
+            let service_name = match logical_name {
+                Some(lit) => lit.value(),
+                None => to_snake_case(&name.to_string()),
+            };
+
+            Ok(ServiceInput::DefinitionOnly(DefinitionOnlyInput {
+                vis,
+                name,
+                service_name,
+                state_type,
+                commands: commands.into_iter().collect(),
+            }))
+        } else {
+            // Full form: { loader: .., handlers: [..] }
+            let body;
+            braced!(body in input);
+
+            // loader: <path>,
+            let _loader_kw: loader = body.parse()?;
+            let _colon: Token![:] = body.parse()?;
+            let loader_fn: Path = body.parse()?;
+            let _comma: Token![,] = body.parse()?;
+
+            // handlers: [ ... ],
+            let _handlers_kw: handlers = body.parse()?;
+            let _colon2: Token![:] = body.parse()?;
+            let entries_buf;
+            bracketed!(entries_buf in body);
+            let entries: Punctuated<HandlerEntry, Token![,]> =
+                entries_buf.parse_terminated(HandlerEntry::parse, Token![,])?;
+
+            // optional trailing comma after the bracket
+            let _ = body.parse::<Token![,]>();
+
+            Ok(ServiceInput::Full(FullServiceInput {
+                vis,
+                name,
+                state_type,
+                loader_fn,
+                handler_entries: entries.into_iter().collect(),
+            }))
+        }
+    }
+}
+
+/// Input for the definition-only form.
+struct DefinitionOnlyInput {
+    vis: Visibility,
+    name: Ident,
+    service_name: String,
+    state_type: Path,
+    commands: Vec<Path>,
+}
+
+/// Input for the full form (original struct, renamed for clarity).
+struct FullServiceInput {
     vis: Visibility,
     name: Ident,
     state_type: Path,
@@ -47,41 +132,31 @@ struct ServiceInput {
     handler_entries: Vec<HandlerEntry>,
 }
 
-impl Parse for ServiceInput {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let vis: Visibility = input.parse()?;
-        let name: Ident = input.parse()?;
-        let _for: Token![for] = input.parse()?;
-        let state_type: Path = input.parse()?;
+// ---------------------------------------------------------------------------
+// snake_case helper
+//
+// Rule: insert `_` before each uppercase character that follows a lowercase
+// character or digit, then lowercase everything.
+// Examples: CounterService → counter_service, HTTPService → h_t_t_p_service
+// (simple per-uppercase-transition rule; no acronym special-casing)
+// ---------------------------------------------------------------------------
 
-        let body;
-        braced!(body in input);
-
-        // loader: <path>,
-        let _loader_kw: loader = body.parse()?;
-        let _colon: Token![:] = body.parse()?;
-        let loader_fn: Path = body.parse()?;
-        let _comma: Token![,] = body.parse()?;
-
-        // handlers: [ ... ],
-        let _handlers_kw: handlers = body.parse()?;
-        let _colon2: Token![:] = body.parse()?;
-        let entries_buf;
-        bracketed!(entries_buf in body);
-        let entries: Punctuated<HandlerEntry, Token![,]> =
-            entries_buf.parse_terminated(HandlerEntry::parse, Token![,])?;
-
-        // optional trailing comma after the bracket
-        let _ = body.parse::<Token![,]>();
-
-        Ok(ServiceInput {
-            vis,
-            name,
-            state_type,
-            loader_fn,
-            handler_entries: entries.into_iter().collect(),
-        })
+fn to_snake_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    let mut prev_lower = false;
+    for ch in s.chars() {
+        if ch.is_uppercase() {
+            if prev_lower {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+            prev_lower = false;
+        } else {
+            out.push(ch);
+            prev_lower = ch.is_lowercase() || ch.is_ascii_digit();
+        }
     }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -134,13 +209,50 @@ fn compute_idx(input_index: usize, total: usize) -> TokenStream2 {
 
 pub fn expand(input: TokenStream) -> TokenStream {
     match syn::parse::<ServiceInput>(input) {
-        Ok(service) => generate(service).into(),
+        Ok(ServiceInput::DefinitionOnly(defn)) => generate_definition_only(defn).into(),
+        Ok(ServiceInput::Full(full)) => generate_full(full).into(),
         Err(e) => e.to_compile_error().into(),
     }
 }
 
-fn generate(service: ServiceInput) -> TokenStream2 {
-    let ServiceInput {
+// ---------------------------------------------------------------------------
+// Definition-only emission
+// ---------------------------------------------------------------------------
+
+fn generate_definition_only(input: DefinitionOnlyInput) -> TokenStream2 {
+    let DefinitionOnlyInput {
+        vis,
+        name,
+        service_name,
+        state_type,
+        commands,
+    } = input;
+
+    let service_name_lit = LitStr::new(&service_name, proc_macro2::Span::call_site());
+
+    // TODO(Task 5): emit restate_client helper once RestateClient<D> exists
+
+    quote! {
+        /// Service definition for #name.
+        ///
+        /// State: `#state_type`
+        #vis struct #name;
+
+        impl ::wee_events::ServiceDefinition for #name {
+            type State = #state_type;
+            const SERVICE_NAME: &'static str = #service_name_lit;
+        }
+
+        #( impl ::wee_events::HasCommand<#commands> for #name {} )*
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Full-form emission (original logic, refactored into its own function)
+// ---------------------------------------------------------------------------
+
+fn generate_full(service: FullServiceInput) -> TokenStream2 {
+    let FullServiceInput {
         vis,
         name,
         state_type,
