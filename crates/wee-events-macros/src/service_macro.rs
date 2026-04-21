@@ -103,9 +103,15 @@ impl Parse for ServiceInput {
             // optional trailing comma after the bracket
             let _ = body.parse::<Token![,]>();
 
+            let service_name = match logical_name {
+                Some(lit) => lit.value(),
+                None => to_snake_case(&name.to_string()),
+            };
+
             Ok(ServiceInput::Full(FullServiceInput {
                 vis,
                 name,
+                service_name,
                 state_type,
                 loader_fn,
                 handler_entries: entries.into_iter().collect(),
@@ -127,6 +133,7 @@ struct DefinitionOnlyInput {
 struct FullServiceInput {
     vis: Visibility,
     name: Ident,
+    service_name: String,
     state_type: Path,
     loader_fn: Path,
     handler_entries: Vec<HandlerEntry>,
@@ -255,6 +262,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     let FullServiceInput {
         vis,
         name,
+        service_name,
         state_type,
         loader_fn,
         handler_entries,
@@ -469,6 +477,26 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         };
     };
 
+    // -----------------------------------------------------------------------
+    // 7. ServiceDefinition + HasCommand<C> impls (definition traits)
+    // -----------------------------------------------------------------------
+
+    let service_name_lit = LitStr::new(&service_name, proc_macro2::Span::call_site());
+
+    let definition_impls = quote! {
+        impl ::wee_events::ServiceDefinition for #name {
+            type State = #state_type;
+            const SERVICE_NAME: &'static str = #service_name_lit;
+        }
+
+        #(
+            impl ::wee_events::HasCommand<<#handler_spec_paths as ::wee_events::HandlerSpec>::Command>
+                for #name {}
+        )*
+
+        // TODO(Task 5): emit restate_client helper once RestateClient<D> exists
+    };
+
     quote! {
         #env_trait
 
@@ -479,5 +507,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         #typed_service_impl
 
         #loader_spec_assertion
+
+        #definition_impls
     }
 }

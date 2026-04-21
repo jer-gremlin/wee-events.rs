@@ -14,7 +14,7 @@ use wee_events::{AggregateId, Command, Entity, Handles, Revision, TypedService};
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Default, Clone)]
-struct Counter {
+pub struct Counter {
     value: i64,
 }
 
@@ -175,4 +175,14 @@ fn env_trait_is_generated() {
     // Any type satisfying the underlying capability traits satisfies CounterServiceEnv
     fn assert_env<T: CounterServiceEnv>() {}
     assert_env::<AppCtx>();
+}
+
+#[test]
+fn full_form_implements_definition_traits() {
+    fn require<D: wee_events::ServiceDefinition + wee_events::HasCommand<Increment>>() {}
+    require::<CounterService>();
+    assert_eq!(
+        <CounterService as wee_events::ServiceDefinition>::SERVICE_NAME,
+        "counter_service"
+    );
 }
