@@ -1,3 +1,4 @@
+use crate::command::Command;
 use crate::entity::Entity;
 use crate::id::{AggregateId, CommandName};
 
@@ -163,3 +164,15 @@ pub trait ServiceDefinition: Send + Sync + 'static {
     type State;
     const SERVICE_NAME: &'static str;
 }
+
+/// Declares that a service can handle command type `C`.
+///
+/// Used to statically assert that a command has been declared in a service.
+/// Typically implemented automatically by the `service!` macro when a command
+/// is registered in the command list.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` does not declare command `{C}`",
+    label = "add `{C}` to the `service!` command list",
+    note = "commands must be listed in the service! declaration for routing"
+)]
+pub trait HasCommand<C: Command>: Send + Sync {}
