@@ -1,14 +1,14 @@
-//! Compile-time shape and trait tests for `restate_service!`-generated items.
+//! Compile-time shape and trait tests for `service!` definition-only declarations.
 //!
 //! Verifies:
-//! - `CounterServiceClient` has the correct API shape
-//! - `Handles<C>` bounds prevent dispatching unregistered commands
-//! - `TypedService<Counter>` is implemented for the client
-//! - `CounterServiceServer::dispatch_json` routes JSON to typed handlers
+//! - `service!` macro generates `CounterService` struct
+//! - `CounterService::restate_client()` returns a `RestateClient<CounterService>`
+//! - `RestateClient<CounterService>` implements `TypedService<Counter>`
+//! - `RestateClient<CounterService>` implements `Handles<C>` for registered commands
 //!
 //! No HTTP calls are made — there is no Restate server running during tests.
 
-use wee_events::{AggregateId, Command};
+use wee_events::{AggregateId, Command, TypedService};
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -37,24 +37,19 @@ impl Command for Adjust {
 }
 
 // ---------------------------------------------------------------------------
-// Client + server generation
+// Service definition (definition-only)
 // ---------------------------------------------------------------------------
 
-wee_events_restate::restate_service! {
-    pub CounterService for Counter {
-        handlers: [
-            Increment => increment,
-            Adjust    => adjust,
-        ],
-    }
+wee_events::service! {
+    pub CounterService("counter") for Counter [Increment, Adjust]
 }
 
 // ---------------------------------------------------------------------------
-// Shared-caller helper — accepts any TypedService<Counter> that handles both
-// commands. Used to verify CounterServiceClient satisfies TypedService<Counter>.
+// Shared trait-bound helper — accepts any RestateClient that implements
+// both TypedService<Counter> and handles the registered commands.
 // ---------------------------------------------------------------------------
 
-fn assert_typed_service<T>(_: &T)
+fn assert_typed_service<T>()
 where
     T: wee_events::TypedService<Counter>
         + wee_events::Handles<Increment>
@@ -66,11 +61,12 @@ where
 // Tests
 // ---------------------------------------------------------------------------
 
-/// Verify that `CounterServiceClient` compiles and exposes the expected API.
-/// The futures are constructed but never awaited — no network is required.
+/// Verify that `CounterService::restate_client()` compiles and exposes the
+/// expected API. The futures are constructed but never awaited — no network
+/// is required.
 #[test]
 fn generated_client_has_typed_methods() {
-    let client = CounterServiceClient::new("http://localhost:8080", "counter");
+    let client = CounterService::restate_client("http://localhost:8080");
     let id: AggregateId = "counter:c1".parse().unwrap();
 
     // Verify load and execute return futures. We use `_` to drop them without
@@ -80,17 +76,11 @@ fn generated_client_has_typed_methods() {
     let _adj_fut = client.execute(&id, Adjust);
 }
 
-/// Verify that `CounterServiceClient` satisfies `TypedService<Counter>`.
+/// Verify that `RestateClient<CounterService>` satisfies `TypedService<Counter>`.
 /// This is a compile-time check — `assert_typed_service` accepts only types
-/// that implement the trait.
+/// that implement the required traits.
 #[test]
 fn client_implements_typed_service() {
-    let client = CounterServiceClient::new("http://localhost:8080", "counter");
-    assert_typed_service(&client);
-}
-
-/// Verify that `CounterServiceServer` is generated as a zero-size type.
-#[test]
-fn server_struct_is_generated() {
-    let _ = CounterServiceServer;
+    use wee_events_restate::RestateClient;
+    assert_typed_service::<RestateClient<CounterService>>();
 }
