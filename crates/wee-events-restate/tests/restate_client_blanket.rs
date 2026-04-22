@@ -1,4 +1,4 @@
-use wee_events::{Command, HasCommand, Handles, ServiceDefinition, TypedService};
+use wee_events::{Command, Handles, HasCommand, ServiceDefinition, TypedService};
 use wee_events_restate::RestateClient;
 
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]

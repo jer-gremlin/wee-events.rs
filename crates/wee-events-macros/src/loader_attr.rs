@@ -73,7 +73,10 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
     };
 
     let last_seg = type_path.path.segments.last().ok_or_else(|| {
-        Error::new_spanned(box_ty.as_ref(), "loader must return `wee_events::Result<Entity<State>>`")
+        Error::new_spanned(
+            box_ty.as_ref(),
+            "loader must return `wee_events::Result<Entity<State>>`",
+        )
     })?;
 
     if last_seg.ident != "Result" {
@@ -115,7 +118,10 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
     };
 
     let entity_seg = entity_path.path.segments.last().ok_or_else(|| {
-        Error::new_spanned(entity_ty, "loader must return `wee_events::Result<Entity<State>>`")
+        Error::new_spanned(
+            entity_ty,
+            "loader must return `wee_events::Result<Entity<State>>`",
+        )
     })?;
 
     if entity_seg.ident != "Entity" {
@@ -182,16 +188,10 @@ fn expand_inner(args: LoaderArgs, func: ItemFn) -> syn::Result<TokenStream2> {
     let requires = &args.requires;
 
     // Spec struct name: {fn_name}_Spec
-    let spec_name = syn::Ident::new(
-        &format!("{}_Spec", fn_name),
-        fn_name.span(),
-    );
+    let spec_name = syn::Ident::new(&format!("{}_Spec", fn_name), fn_name.span());
 
     // Composite requires trait name: __{fn_name}_Requires
-    let requires_trait_name = syn::Ident::new(
-        &format!("__{}_Requires", fn_name),
-        fn_name.span(),
-    );
+    let requires_trait_name = syn::Ident::new(&format!("__{}_Requires", fn_name), fn_name.span());
 
     // Build the supertraits for the composite requires trait
     let requires_supertraits: TokenStream2 = if requires.is_empty() {

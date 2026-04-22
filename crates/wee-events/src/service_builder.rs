@@ -131,11 +131,18 @@ pub struct EmptyHandlers;
 ///
 /// `C` is the command type handled at this node, `H` is the handler function,
 /// and `Tail` is the rest of the list.
+///
+/// Fields are `pub` (doc-hidden) so adapter crates can implement their own
+/// list-traversal traits (e.g. name-first dispatch for transport adapters)
+/// without coupling the core crate to transport concerns.
 #[doc(hidden)]
 pub struct HandlerList<C, H, Tail> {
-    handler: H,
-    tail: Tail,
-    _cmd: PhantomData<fn(C)>,
+    #[doc(hidden)]
+    pub handler: H,
+    #[doc(hidden)]
+    pub tail: Tail,
+    #[doc(hidden)]
+    pub _cmd: PhantomData<fn(C)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +404,19 @@ impl<S, L, Handlers> ServiceBuilder<S, L, Handlers> {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = crate::Result<Ctx>> + Send + 'static,
     {
+        self.build_raw(factory)
+    }
+
+    /// Consume the builder and produce a `BuiltService` without enforcing a
+    /// factory shape.
+    ///
+    /// Escape hatch for adapters whose factories have non-standard signatures
+    /// (e.g. `Fn(&some_adapter::Context) -> Future`). The adapter crate is
+    /// responsible for providing the bridge impl that matches the factory
+    /// shape; the portable interpreter requires the `Fn() -> Future` shape
+    /// enforced by `build`.
+    #[doc(hidden)]
+    pub fn build_raw<Ctx, F>(self, factory: F) -> BuiltService<Ctx, S, L, F, Handlers> {
         BuiltService {
             factory,
             loader: self.loader,

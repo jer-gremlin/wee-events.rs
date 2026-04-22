@@ -158,7 +158,7 @@ pub trait TypedService<S>: __private::ServiceState<State = S> + Send + Sync {
 /// service name. It is the minimal contract for service definitions.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a service definition",
-    note = "use the `service!` macro to generate a ServiceDefinition impl",
+    note = "use the `service!` macro to generate a ServiceDefinition impl"
 )]
 pub trait ServiceDefinition: Send + Sync + 'static {
     type State;

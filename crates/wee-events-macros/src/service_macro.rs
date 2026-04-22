@@ -174,7 +174,10 @@ fn to_snake_case(s: &str) -> String {
 /// `foo::bar::baz_Spec` by appending `_Spec` to the last segment ident.
 fn spec_path(fn_path: &Path) -> Path {
     let mut spec = fn_path.clone();
-    let last = spec.segments.last_mut().expect("path must have at least one segment");
+    let last = spec
+        .segments
+        .last_mut()
+        .expect("path must have at least one segment");
     last.ident = format_ident!("{}_Spec", last.ident);
     spec
 }
@@ -184,7 +187,10 @@ fn spec_path(fn_path: &Path) -> Path {
 /// last segment ident.
 fn requires_path(fn_path: &Path) -> Path {
     let mut req = fn_path.clone();
-    let last = req.segments.last_mut().expect("path must have at least one segment");
+    let last = req
+        .segments
+        .last_mut()
+        .expect("path must have at least one segment");
     last.ident = format_ident!("__{}_Requires", last.ident);
     req
 }
@@ -281,8 +287,14 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     let loader_requires_path = requires_path(&loader_fn);
 
     // Derive spec and requires paths for each handler
-    let handler_spec_paths: Vec<Path> = handler_entries.iter().map(|e| spec_path(&e.fn_path)).collect();
-    let handler_requires_paths: Vec<Path> = handler_entries.iter().map(|e| requires_path(&e.fn_path)).collect();
+    let handler_spec_paths: Vec<Path> = handler_entries
+        .iter()
+        .map(|e| spec_path(&e.fn_path))
+        .collect();
+    let handler_requires_paths: Vec<Path> = handler_entries
+        .iter()
+        .map(|e| requires_path(&e.fn_path))
+        .collect();
     let handler_fn_paths: Vec<&Path> = handler_entries.iter().map(|e| &e.fn_path).collect();
 
     // Name for the generated service-specific env trait: {Name}Env
@@ -377,6 +389,35 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     .with_loader(#loader_fn::<__R>)
                     #(#with_handler_calls)*
                     .build(factory)
+            }
+
+            /// Build a Restate-harness service using the given factory to
+            /// construct the environment per-request from a Restate
+            /// `Context<'_>`.
+            ///
+            /// The returned value implements `RestateDispatch`, which the
+            /// Restate server binder consumes to wire durable `load` and
+            /// `execute` operations. Dispatch routing reuses the same
+            /// `HandlerList` HList as the portable path — the only
+            /// harness-specific piece is the factory signature.
+            #vis fn restate<__R, __F, __Fut>(factory: __F)
+                -> impl ::wee_events_restate::RestateDispatch
+            where
+                __R: #env_trait_name,
+                __F: for<'__ctx> ::std::ops::Fn(
+                        &'__ctx ::wee_events_restate::__private::Context<'__ctx>,
+                    ) -> __Fut
+                    + ::std::marker::Send
+                    + ::std::marker::Sync
+                    + 'static,
+                __Fut: ::std::future::Future<Output = wee_events::Result<__R>>
+                    + ::std::marker::Send
+                    + 'static,
+            {
+                wee_events::ServiceBuilder::<#state_type>::new()
+                    .with_loader(#loader_fn::<__R>)
+                    #(#with_handler_calls)*
+                    .build_raw::<__R, __F>(factory)
             }
         }
     };

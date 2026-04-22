@@ -74,7 +74,10 @@ async fn increment<R: HasRandomSource>(
 // The test functions below call it with a concrete TestCtx.
 // ---------------------------------------------------------------------------
 
-async fn build_and_run<R, F, Fut>(factory: F, id: AggregateId) -> wee_events::Result<Entity<Counter>>
+async fn build_and_run<R, F, Fut>(
+    factory: F,
+    id: AggregateId,
+) -> wee_events::Result<Entity<Counter>>
 where
     R: HasStore + HasRandomSource + Send + Sync + 'static,
     F: Fn() -> Fut + Send + Sync + 'static,
@@ -88,7 +91,10 @@ where
     service.execute(&id, Increment { amount: 7 }).await
 }
 
-async fn build_and_load<R, F, Fut>(factory: F, id: AggregateId) -> wee_events::Result<Entity<Counter>>
+async fn build_and_load<R, F, Fut>(
+    factory: F,
+    id: AggregateId,
+) -> wee_events::Result<Entity<Counter>>
 where
     R: HasStore + HasRandomSource + Send + Sync + 'static,
     F: Fn() -> Fut + Send + Sync + 'static,
