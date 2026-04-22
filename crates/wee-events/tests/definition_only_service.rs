@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use wee_events::{Command, HasCommand, ServiceDefinition};
 
 #[derive(Default)]

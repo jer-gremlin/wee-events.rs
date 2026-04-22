@@ -13,12 +13,12 @@ use wee_events::{AggregateId, Command, Entity, Handles, Revision, TypedService};
 // Domain model
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Counter {
     value: i64,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Increment {
     amount: i64,
 }
@@ -27,7 +27,7 @@ impl Command for Increment {
     const NAME: &'static str = "counter:increment";
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Adjust;
 
 impl Command for Adjust {

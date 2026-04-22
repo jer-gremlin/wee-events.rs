@@ -56,8 +56,12 @@ impl Parse for HandlerArgs {
             }
         }
 
-        let command = command
-            .ok_or_else(|| Error::new(proc_macro2::Span::call_site(), "`command = <Type>` is required for #[handler]"))?;
+        let command = command.ok_or_else(|| {
+            Error::new(
+                proc_macro2::Span::call_site(),
+                "`command = <Type>` is required for #[handler]",
+            )
+        })?;
 
         Ok(HandlerArgs { command, requires })
     }
@@ -87,7 +91,10 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
     // Navigate the path segments to find Result<...>
     // Accept: Result<...>, wee_events::Result<...>
     let last_seg = type_path.path.segments.last().ok_or_else(|| {
-        Error::new_spanned(box_ty.as_ref(), "handler must return `wee_events::Result<Entity<State>>`")
+        Error::new_spanned(
+            box_ty.as_ref(),
+            "handler must return `wee_events::Result<Entity<State>>`",
+        )
     })?;
 
     if last_seg.ident != "Result" {
@@ -131,7 +138,10 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
     };
 
     let entity_seg = entity_path.path.segments.last().ok_or_else(|| {
-        Error::new_spanned(entity_ty, "handler must return `wee_events::Result<Entity<State>>`")
+        Error::new_spanned(
+            entity_ty,
+            "handler must return `wee_events::Result<Entity<State>>`",
+        )
     })?;
 
     if entity_seg.ident != "Entity" {
@@ -199,16 +209,10 @@ fn expand_inner(args: HandlerArgs, func: ItemFn) -> syn::Result<TokenStream2> {
     let requires = &args.requires;
 
     // Spec struct name: {fn_name}_Spec
-    let spec_name = syn::Ident::new(
-        &format!("{}_Spec", fn_name),
-        fn_name.span(),
-    );
+    let spec_name = syn::Ident::new(&format!("{}_Spec", fn_name), fn_name.span());
 
     // Composite requires trait name: __{fn_name}_Requires
-    let requires_trait_name = syn::Ident::new(
-        &format!("__{}_Requires", fn_name),
-        fn_name.span(),
-    );
+    let requires_trait_name = syn::Ident::new(&format!("__{}_Requires", fn_name), fn_name.span());
 
     // Build the supertraits for the composite requires trait
     let requires_supertraits: TokenStream2 = if requires.is_empty() {

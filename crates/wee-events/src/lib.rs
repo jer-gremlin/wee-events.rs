@@ -30,18 +30,19 @@ pub use id::{
     EventType, Revision,
 };
 pub use renderer::{ReduceFn, Renderer};
-pub use service::{CommandExecutor, EntityLoader, Handles, HasCommand, Rejection, Service, ServiceDefinition, TypedService};
-pub use service_builder::{BuiltService, ServiceBuilder};
 #[doc(hidden)]
-pub use service_builder::{
-    FactoryBridge, HandleCommand, HandlerBridge, HandlerList, LoaderBridge,
+pub use service::__private;
+pub use service::{
+    CommandExecutor, EntityLoader, Handles, HasCommand, Rejection, Service, ServiceDefinition,
+    TypedService,
 };
+pub use service_builder::{BuiltService, ServiceBuilder};
 #[doc(hidden)]
 pub use service_builder::{EmptyHandlers, Here, There};
 #[doc(hidden)]
-pub use service::__private;
-pub use store::{EventStore, PublishOptions, RawEvent};
+pub use service_builder::{FactoryBridge, HandleCommand, HandlerBridge, HandlerList, LoaderBridge};
 pub use spec::{HandlerSpec, LoaderSpec};
+pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{handler, loader, service, Command, DomainEvent};
 
 pub mod memory {
