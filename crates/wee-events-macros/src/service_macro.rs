@@ -382,7 +382,6 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         handler_entries,
         effect_entries,
     } = service;
-    let _ = &effect_entries;
 
     // Effective Restate method name for the loader.
     let loader_wire_name = loader_entry
@@ -666,6 +665,90 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         .enumerate()
         .map(|(i, _)| format_ident!("__wee_events_handler_{}", i))
         .collect();
+    let effect_filter_idents: Vec<Ident> = effect_entries
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            format_ident!(
+                "__wee_events_{}_effect_filter_{}",
+                to_snake_case(&name.to_string()),
+                i
+            )
+        })
+        .collect();
+
+    let effect_filter_functions: Vec<TokenStream2> = effect_entries
+        .iter()
+        .zip(effect_filter_idents.iter())
+        .map(|(entry, filter_ident)| {
+            let filter = match &entry.filter {
+                EffectFilterSpec::All => {
+                    quote! {
+                        ::wee_events_restate::SideEffectFilter::All
+                    }
+                }
+                EffectFilterSpec::Commands(commands) => {
+                    quote! {
+                        ::wee_events_restate::SideEffectFilter::Names(::std::vec![
+                            #(
+                                ::wee_events::CommandName::from(
+                                    <#commands as ::wee_events::Command>::NAME,
+                                ),
+                            )*
+                        ])
+                    }
+                }
+                EffectFilterSpec::Predicate(predicate) => {
+                    quote! {
+                        ::wee_events_restate::SideEffectFilter::Predicate(
+                            ::std::boxed::Box::new(#predicate),
+                        )
+                    }
+                }
+            };
+
+            quote! {
+                fn #filter_ident(
+                    notification: &::wee_events_restate::ExecuteNotification,
+                ) -> bool {
+                    let filter = #filter;
+                    filter.matches(notification)
+                }
+            }
+        })
+        .collect();
+
+    let effect_dispatch_calls: Vec<TokenStream2> = effect_entries
+        .iter()
+        .zip(effect_filter_idents.iter())
+        .map(|(entry, filter_ident)| {
+            let effect_client_ident = format_ident!("{}Client", entry.workflow_ident);
+            quote! {
+                if #filter_ident(&notification) {
+                    let effect_client =
+                        ::wee_events_restate::__private::context::ContextClient::workflow_client::<
+                            #effect_client_ident<'_>,
+                        >(&ctx, correlation.clone());
+                    let _ = effect_client
+                        .run(::wee_events_restate::__private::serde::Json(notification.clone()))
+                        .send();
+                }
+            }
+        })
+        .collect();
+    let effect_command_bounds: Vec<TokenStream2> = if effect_entries.is_empty() {
+        Vec::new()
+    } else {
+        handler_spec_paths
+            .iter()
+            .map(|sp| {
+                quote! {
+                    <#sp as ::wee_events::HandlerSpec>::Command:
+                        ::std::clone::Clone + ::serde::Serialize,
+                }
+            })
+            .collect()
+    };
 
     let binder_trait_methods: Vec<TokenStream2> = handler_method_idents
         .iter()
@@ -691,6 +774,47 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         .zip(handler_fn_paths.iter())
         .zip(handler_spec_paths.iter())
         .map(|((method_ident, fn_path), sp)| {
+            let handle_command = if effect_entries.is_empty() {
+                quote! {
+                    let entity = #fn_path::<__R>(&env, &entity, command.into_inner())
+                        .await
+                        .map_err(::wee_events_restate::__private::to_handler_error)?;
+                    ::wee_events_restate::__private::to_entity_response(entity)
+                }
+            } else {
+                quote! {
+                    let command = command.into_inner();
+                    let command_for_notification = command.clone();
+                    let entity = #fn_path::<__R>(&env, &entity, command)
+                        .await
+                        .map_err(::wee_events_restate::__private::to_handler_error)?;
+                    let response = ::wee_events_restate::__private::to_entity_response(entity)?;
+                    let command_name = ::wee_events::CommandName::from(
+                        <<#sp as ::wee_events::HandlerSpec>::Command as ::wee_events::Command>::NAME,
+                    );
+                    let correlation = ::wee_events_restate::correlation_id(&id, &command_name);
+                    let notification = ::wee_events_restate::ExecuteNotification {
+                        command: ::wee_events_restate::CommandRequest {
+                            name: command_name,
+                            target: id.clone(),
+                            command: ::serde_json::to_value(&command_for_notification).map_err(|e| {
+                                ::wee_events_restate::__private::errors::TerminalError::new(
+                                    e.to_string(),
+                                )
+                            })?,
+                        },
+                        response: response.clone(),
+                        metadata: ::wee_events_restate::Metadata {
+                            correlation_id: correlation.clone(),
+                            causation_id: None,
+                            idempotency_key: None,
+                        },
+                    };
+                    #(#effect_dispatch_calls)*
+                    Ok(response)
+                }
+            };
+
             quote! {
                 async fn #method_ident(
                     &self,
@@ -714,10 +838,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     let entity = #loader_fn_path::<__R>(&env, &id)
                         .await
                         .map_err(::wee_events_restate::__private::to_handler_error)?;
-                    let entity = #fn_path::<__R>(&env, &entity, command.into_inner())
-                        .await
-                        .map_err(::wee_events_restate::__private::to_handler_error)?;
-                    ::wee_events_restate::__private::to_entity_response(entity)
+                    #handle_command
                 }
             }
         })
@@ -752,6 +873,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                 + ::std::marker::Send
                 + 'static,
             #state_type: ::serde::Serialize,
+            #(#effect_command_bounds)*
         {
             async fn #loader_method_ident(
                 &self,
@@ -817,6 +939,8 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         #loader_spec_assertion
 
         #definition_impls
+
+        #(#effect_filter_functions)*
 
         #binder
     }
