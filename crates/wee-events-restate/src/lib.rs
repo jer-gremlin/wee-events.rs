@@ -1,5 +1,6 @@
 mod bundle;
 mod client;
+mod correlation;
 mod effects;
 mod executor;
 #[doc(hidden)]
@@ -12,6 +13,7 @@ mod types;
 
 pub use bundle::{service_bundle, ServiceBundle};
 pub use client::RestateClient;
+pub use correlation::correlation_id;
 pub use effects::{EffectRouter, EffectTrigger, SideEffectFilter};
 pub use executor::CommandHandler;
 pub use loader::LoadHandler;
