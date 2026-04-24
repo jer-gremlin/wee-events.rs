@@ -1,0 +1,5 @@
+error: unexpected token in predicate filter
+  --> tests/ui/service_macro_rejects_malformed_predicate.rs:43:43
+   |
+43 |             AuditLog on predicate(|n| true, extra),
+   |                                           ^

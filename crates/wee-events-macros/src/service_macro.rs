@@ -75,6 +75,9 @@ impl Parse for EffectEntry {
             let inner;
             syn::parenthesized!(inner in input);
             let closure: syn::ExprClosure = inner.parse()?;
+            if !inner.is_empty() {
+                return Err(inner.error("unexpected token in predicate filter"));
+            }
             EffectFilterSpec::Predicate(closure)
         } else if input.peek(syn::token::Bracket) {
             let buf;
