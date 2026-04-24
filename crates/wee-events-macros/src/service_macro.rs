@@ -797,7 +797,10 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                         command: ::wee_events_restate::CommandRequest {
                             name: command_name,
                             target: id.clone(),
-                            command: ::serde_json::to_value(&command_for_notification).map_err(|e| {
+                            command: ::wee_events_restate::__private::serde_json::to_value(
+                                &command_for_notification,
+                            )
+                            .map_err(|e| {
                                 ::wee_events_restate::__private::errors::TerminalError::new(
                                     e.to_string(),
                                 )

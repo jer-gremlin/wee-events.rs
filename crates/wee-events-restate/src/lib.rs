@@ -28,6 +28,7 @@ pub mod __private {
 
     pub use restate_sdk::context::Context;
     pub use restate_sdk::{context, errors, object, serde};
+    pub use serde_json;
 
     pub fn to_handler_error(e: wee_events::Error) -> restate_sdk::errors::HandlerError {
         match e {
