@@ -4,5 +4,6 @@ fn ui() {
     t.compile_fail("tests/ui/unregistered_command.rs");
     t.compile_fail("tests/ui/missing_has_command.rs");
     t.compile_fail("tests/ui/service_name_collision.rs");
+    t.compile_fail("tests/ui/service_macro_rejects_trailing_fields.rs");
     t.pass("tests/ui/definition_only_compiles.rs");
 }

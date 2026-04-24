@@ -196,6 +196,10 @@ impl Parse for ServiceInput {
                 Vec::new()
             };
 
+            if !body.is_empty() {
+                return Err(body.error("unexpected token in service body"));
+            }
+
             let service_name = match logical_name {
                 Some(lit) => lit.value(),
                 None => to_snake_case(&name.to_string()),
