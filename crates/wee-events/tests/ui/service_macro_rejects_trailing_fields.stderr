@@ -1,0 +1,5 @@
+error: unexpected token in service body
+  --> tests/ui/service_macro_rejects_trailing_fields.rs:45:9
+   |
+45 |         effectz: [],
+   |         ^^^^^^^
