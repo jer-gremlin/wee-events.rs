@@ -1,0 +1,35 @@
+error[E0277]: the trait bound `(): CEnv` is not satisfied
+  --> tests/ui/portable_rejects_durable_capability.rs:51:13
+   |
+51 |     let _ = C::portable(|| async { Ok(()) });
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `HasDurableRandom` is not implemented for `()`
+   |
+help: this trait has no implementations, consider adding one
+  --> tests/ui/portable_rejects_durable_capability.rs:8:1
+   |
+ 8 | trait HasDurableRandom: Send + Sync + 'static {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required for `()` to implement `__load_Requires`
+  --> tests/ui/portable_rejects_durable_capability.rs:21:1
+   |
+21 | #[wee_events::loader(requires(HasDurableRandom))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+22 | async fn load<R: HasDurableRandom>(
+   |          ^^^^
+note: required for `()` to implement `CEnv`
+  --> tests/ui/portable_rejects_durable_capability.rs:42:1
+   |
+42 | / wee_events::service! {
+43 | |     pub C("c") for Counter {
+   | |         ^
+44 | |         loader: load,
+45 | |         handlers: [inc],
+46 | |     }
+47 | | }
+   | |_^
+note: required by a bound in `C::portable`
+  --> tests/ui/portable_rejects_durable_capability.rs:43:9
+   |
+43 |     pub C("c") for Counter {
+   |         ^ required by this bound in `C::portable`
+   = note: this error originates in the attribute macro `wee_events::loader` which comes from the expansion of the macro `wee_events::service` (in Nightly builds, run with -Z macro-backtrace for more info)
