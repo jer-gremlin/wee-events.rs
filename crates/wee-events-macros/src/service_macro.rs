@@ -19,16 +19,43 @@ syn::custom_keyword!(handlers);
 // AST types
 // ---------------------------------------------------------------------------
 
-/// A single handler entry: a bare function path, e.g. `increment` or
-/// `crate::domain::increment`.
+/// A single handler entry: `<fn_path>` optionally followed by `as "wire_name"`.
 struct HandlerEntry {
     fn_path: Path,
+    #[allow(dead_code)]
+    wire_name: Option<LitStr>,
 }
 
 impl Parse for HandlerEntry {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let fn_path: Path = input.parse()?;
-        Ok(HandlerEntry { fn_path })
+        let wire_name: Option<LitStr> = if input.peek(Token![as]) {
+            let _as: Token![as] = input.parse()?;
+            Some(input.parse::<LitStr>()?)
+        } else {
+            None
+        };
+        Ok(HandlerEntry { fn_path, wire_name })
+    }
+}
+
+/// The loader entry mirrors a handler entry but is parsed inline (no braces).
+struct LoaderEntry {
+    fn_path: Path,
+    #[allow(dead_code)]
+    wire_name: Option<LitStr>,
+}
+
+impl LoaderEntry {
+    fn parse_inline(input: ParseStream) -> syn::Result<Self> {
+        let fn_path: Path = input.parse()?;
+        let wire_name: Option<LitStr> = if input.peek(Token![as]) {
+            let _as: Token![as] = input.parse()?;
+            Some(input.parse::<LitStr>()?)
+        } else {
+            None
+        };
+        Ok(LoaderEntry { fn_path, wire_name })
     }
 }
 
@@ -86,10 +113,10 @@ impl Parse for ServiceInput {
             let body;
             braced!(body in input);
 
-            // loader: <path>,
+            // loader: <path> [as "wire"] ,
             let _loader_kw: loader = body.parse()?;
             let _colon: Token![:] = body.parse()?;
-            let loader_fn: Path = body.parse()?;
+            let loader_entry = LoaderEntry::parse_inline(&body)?;
             let _comma: Token![,] = body.parse()?;
 
             // handlers: [ ... ],
@@ -113,7 +140,7 @@ impl Parse for ServiceInput {
                 name,
                 service_name,
                 state_type,
-                loader_fn,
+                loader_entry,
                 handler_entries: entries.into_iter().collect(),
             }))
         }
@@ -135,7 +162,7 @@ struct FullServiceInput {
     name: Ident,
     service_name: String,
     state_type: Path,
-    loader_fn: Path,
+    loader_entry: LoaderEntry,
     handler_entries: Vec<HandlerEntry>,
 }
 
@@ -276,15 +303,16 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         name,
         service_name,
         state_type,
-        loader_fn,
+        loader_entry,
         handler_entries,
     } = service;
 
+    let loader_fn_path = &loader_entry.fn_path;
     let total = handler_entries.len();
 
     // Derive spec and requires paths for the loader
-    let loader_spec_path = spec_path(&loader_fn);
-    let loader_requires_path = requires_path(&loader_fn);
+    let loader_spec_path = spec_path(loader_fn_path);
+    let loader_requires_path = requires_path(loader_fn_path);
 
     // Derive spec and requires paths for each handler
     let handler_spec_paths: Vec<Path> = handler_entries
@@ -386,7 +414,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     + 'static,
             {
                 wee_events::ServiceBuilder::<#state_type>::new()
-                    .with_loader(#loader_fn::<__R>)
+                    .with_loader(#loader_fn_path::<__R>)
                     #(#with_handler_calls)*
                     .build(factory)
             }
