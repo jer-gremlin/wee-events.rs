@@ -14,6 +14,9 @@ use syn::{
 
 syn::custom_keyword!(loader);
 syn::custom_keyword!(handlers);
+syn::custom_keyword!(effects);
+syn::custom_keyword!(any);
+syn::custom_keyword!(predicate);
 
 // ---------------------------------------------------------------------------
 // AST types
@@ -36,6 +39,56 @@ impl Parse for HandlerEntry {
             None
         };
         Ok(HandlerEntry { fn_path, wire_name })
+    }
+}
+
+/// A single effect entry: `<WorkflowIdent> on <filter>`.
+#[allow(dead_code)]
+struct EffectEntry {
+    workflow_ident: Ident,
+    filter: EffectFilterSpec,
+}
+
+#[allow(dead_code)]
+enum EffectFilterSpec {
+    /// `on any`
+    All,
+    /// `on [Cmd1, Cmd2, ...]` - command type paths.
+    Commands(Vec<Path>),
+    /// `on predicate(|n| ...)` - a closure expression evaluating on `&ExecuteNotification`.
+    Predicate(syn::ExprClosure),
+}
+
+impl Parse for EffectEntry {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let workflow_ident: Ident = input.parse()?;
+        let on_kw: Ident = input.parse()?;
+        if on_kw != "on" {
+            return Err(syn::Error::new(on_kw.span(), "expected `on`"));
+        }
+
+        let filter = if input.peek(any) {
+            let _: any = input.parse()?;
+            EffectFilterSpec::All
+        } else if input.peek(predicate) {
+            let _: predicate = input.parse()?;
+            let inner;
+            syn::parenthesized!(inner in input);
+            let closure: syn::ExprClosure = inner.parse()?;
+            EffectFilterSpec::Predicate(closure)
+        } else if input.peek(syn::token::Bracket) {
+            let buf;
+            bracketed!(buf in input);
+            let cmds: Punctuated<Path, Token![,]> = buf.parse_terminated(Path::parse, Token![,])?;
+            EffectFilterSpec::Commands(cmds.into_iter().collect())
+        } else {
+            return Err(input.error("expected `any`, `predicate(...)`, or `[Cmd, ...]` after `on`"));
+        };
+
+        Ok(EffectEntry {
+            workflow_ident,
+            filter,
+        })
     }
 }
 
@@ -130,6 +183,19 @@ impl Parse for ServiceInput {
             // optional trailing comma after the bracket
             let _ = body.parse::<Token![,]>();
 
+            let effect_entries: Vec<EffectEntry> = if body.peek(effects) {
+                let _: effects = body.parse()?;
+                let _: Token![:] = body.parse()?;
+                let eff_buf;
+                bracketed!(eff_buf in body);
+                let entries: Punctuated<EffectEntry, Token![,]> =
+                    eff_buf.parse_terminated(EffectEntry::parse, Token![,])?;
+                let _ = body.parse::<Token![,]>();
+                entries.into_iter().collect()
+            } else {
+                Vec::new()
+            };
+
             let service_name = match logical_name {
                 Some(lit) => lit.value(),
                 None => to_snake_case(&name.to_string()),
@@ -142,6 +208,7 @@ impl Parse for ServiceInput {
                 state_type,
                 loader_entry,
                 handler_entries: entries.into_iter().collect(),
+                effect_entries,
             }))
         }
     }
@@ -164,6 +231,7 @@ struct FullServiceInput {
     state_type: Path,
     loader_entry: LoaderEntry,
     handler_entries: Vec<HandlerEntry>,
+    effect_entries: Vec<EffectEntry>,
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +373,9 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         state_type,
         loader_entry,
         handler_entries,
+        effect_entries,
     } = service;
+    let _ = &effect_entries;
 
     // Effective Restate method name for the loader.
     let loader_wire_name = loader_entry
