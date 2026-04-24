@@ -1,5 +1,5 @@
 //! Verifies that `service!` accepts an optional `effects:` block with
-//! all three filter forms. Emission is Task 8; this is parse-only.
+//! all three filter forms.
 
 #![allow(dead_code)]
 
@@ -20,11 +20,26 @@ impl Command for Adj {
     const NAME: &'static str = "counter:adjust";
 }
 
-// User-facing marker types - the macro treats them as workflow idents and
-// will emit `<Ident>Client` references in Task 8.
-struct SendWelcomeEmail;
-struct UpdateAnalytics;
-struct AuditLog;
+#[restate_sdk::workflow]
+trait SendWelcomeEmail {
+    async fn run(
+        notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
+    ) -> Result<(), restate_sdk::errors::HandlerError>;
+}
+
+#[restate_sdk::workflow]
+trait UpdateAnalytics {
+    async fn run(
+        notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
+    ) -> Result<(), restate_sdk::errors::HandlerError>;
+}
+
+#[restate_sdk::workflow]
+trait AuditLog {
+    async fn run(
+        notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
+    ) -> Result<(), restate_sdk::errors::HandlerError>;
+}
 
 #[wee_events::loader]
 async fn load<R: Send + Sync + 'static>(
