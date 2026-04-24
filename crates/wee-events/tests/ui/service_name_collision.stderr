@@ -1,0 +1,5 @@
+error: wire name `load` collides with another handler or with the reserved loader name `load`. Use `load as "…"` to pick a different wire name.
+  --> tests/ui/service_name_collision.rs:40:20
+   |
+40 |         handlers: [load],
+   |                    ^^^^
