@@ -117,8 +117,8 @@ pub trait SqldNamespacedProvisioner: NamedTargetProvisioner {}
 /// provisioner maps that key to a concrete Turso database URL. Each partition
 /// gets its own database, created on demand via the Turso Platform API.
 ///
-/// Enable the `turso` feature for a ready-to-use implementation:
-/// [`TursoPlatformProvisioner`](crate::TursoPlatformProvisioner).
+/// Enable the `turso` feature for the ready-to-use `TursoPlatformProvisioner`
+/// implementation.
 pub trait TursoProvisioner: NamedTargetProvisioner {}
 
 #[cfg(test)]
