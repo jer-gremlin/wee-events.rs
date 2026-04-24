@@ -1,7 +1,5 @@
 mod bundle;
 mod client;
-mod context;
-mod dispatch;
 mod effects;
 mod executor;
 #[doc(hidden)]
@@ -14,10 +12,6 @@ mod types;
 
 pub use bundle::{service_bundle, ServiceBundle};
 pub use client::RestateClient;
-pub use context::HasRestateContext;
-pub use dispatch::RestateDispatch;
-#[doc(hidden)]
-pub use dispatch::{HandleByName, RestateFactoryBridge};
 pub use effects::{EffectRouter, EffectTrigger, SideEffectFilter};
 pub use executor::CommandHandler;
 pub use loader::LoadHandler;
