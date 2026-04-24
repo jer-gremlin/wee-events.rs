@@ -318,6 +318,88 @@ fn compute_idx(input_index: usize, total: usize) -> TokenStream2 {
     idx
 }
 
+fn is_rust_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    if !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
+        return false;
+    }
+    !matches!(
+        s,
+        "abstract"
+            | "as"
+            | "async"
+            | "await"
+            | "become"
+            | "box"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "do"
+            | "dyn"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "final"
+            | "fn"
+            | "for"
+            | "gen"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "macro"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "override"
+            | "priv"
+            | "pub"
+            | "ref"
+            | "return"
+            | "Self"
+            | "self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "try"
+            | "type"
+            | "typeof"
+            | "union"
+            | "unsized"
+            | "unsafe"
+            | "use"
+            | "virtual"
+            | "where"
+            | "while"
+            | "yield"
+    )
+}
+
+fn method_ident_for(wire_name: &str, fn_path: &Path) -> Ident {
+    if is_rust_identifier(wire_name) {
+        format_ident!("{}", wire_name)
+    } else {
+        fn_path
+            .segments
+            .last()
+            .expect("fn path has at least one segment")
+            .ident
+            .clone()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Code generation
 // ---------------------------------------------------------------------------
@@ -653,6 +735,138 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
 
     let service_name_lit = LitStr::new(&service_name, proc_macro2::Span::call_site());
 
+    let binder_trait_name = format_ident!("{}Binder", name);
+    let binding_name = format_ident!("{}Binding", name);
+    let loader_wire_name_lit = LitStr::new(&loader_wire_name, proc_macro2::Span::call_site());
+    let loader_method_ident = method_ident_for(&loader_wire_name, loader_fn_path);
+    let handler_wire_name_lits: Vec<LitStr> = handler_wire_names
+        .iter()
+        .map(|wire| LitStr::new(wire, proc_macro2::Span::call_site()))
+        .collect();
+    let handler_method_idents: Vec<Ident> = handler_wire_names
+        .iter()
+        .zip(handler_fn_paths.iter())
+        .map(|(wire, fn_path)| method_ident_for(wire, fn_path))
+        .collect();
+
+    let binder_trait_methods: Vec<TokenStream2> = handler_method_idents
+        .iter()
+        .zip(handler_wire_name_lits.iter())
+        .zip(handler_spec_paths.iter())
+        .map(|((method_ident, wire_lit), sp)| {
+            quote! {
+                #[name = #wire_lit]
+                async fn #method_ident(
+                    command: ::wee_events_restate::__private::serde::Json<
+                        <#sp as ::wee_events::HandlerSpec>::Command,
+                    >,
+                ) -> ::std::result::Result<
+                    ::wee_events_restate::EntityResponse,
+                    ::wee_events_restate::__private::errors::HandlerError,
+                >;
+            }
+        })
+        .collect();
+
+    let binder_impl_methods: Vec<TokenStream2> = handler_method_idents
+        .iter()
+        .zip(handler_fn_paths.iter())
+        .zip(handler_spec_paths.iter())
+        .map(|((method_ident, fn_path), sp)| {
+            quote! {
+                async fn #method_ident(
+                    &self,
+                    ctx: ::wee_events_restate::__private::context::ObjectContext<'_>,
+                    command: ::wee_events_restate::__private::serde::Json<
+                        <#sp as ::wee_events::HandlerSpec>::Command,
+                    >,
+                ) -> ::std::result::Result<
+                    ::wee_events_restate::EntityResponse,
+                    ::wee_events_restate::__private::errors::HandlerError,
+                > {
+                    let env = (&self.factory)()
+                        .await
+                        .map_err(::wee_events_restate::__private::to_handler_error)?;
+                    let id = ctx
+                        .key()
+                        .parse::<::wee_events::AggregateId>()
+                        .map_err(|e| {
+                            ::wee_events_restate::__private::errors::TerminalError::new(e.to_string())
+                        })?;
+                    let entity = #loader_fn_path::<__R>(&env, &id)
+                        .await
+                        .map_err(::wee_events_restate::__private::to_handler_error)?;
+                    let entity = #fn_path::<__R>(&env, &entity, command.into_inner())
+                        .await
+                        .map_err(::wee_events_restate::__private::to_handler_error)?;
+                    ::wee_events_restate::__private::to_entity_response(entity)
+                }
+            }
+        })
+        .collect();
+
+    let binder = quote! {
+        #[::wee_events_restate::__private::object]
+        #[name = #service_name_lit]
+        #vis trait #binder_trait_name {
+            #[shared]
+            #[name = #loader_wire_name_lit]
+            async fn #loader_method_ident() -> ::std::result::Result<
+                ::wee_events_restate::EntityResponse,
+                ::wee_events_restate::__private::errors::HandlerError,
+            >;
+
+            #(#binder_trait_methods)*
+        }
+
+        #vis struct #binding_name<__F> {
+            factory: __F,
+        }
+
+        impl<__R, __F, __Fut> #binder_trait_name for #binding_name<__F>
+        where
+            __R: #env_trait_name,
+            __F: ::std::ops::Fn() -> __Fut
+                + ::std::marker::Send
+                + ::std::marker::Sync
+                + 'static,
+            __Fut: ::std::future::Future<Output = ::wee_events::Result<__R>>
+                + ::std::marker::Send
+                + 'static,
+            #state_type: ::serde::Serialize,
+        {
+            async fn #loader_method_ident(
+                &self,
+                ctx: ::wee_events_restate::__private::context::SharedObjectContext<'_>,
+            ) -> ::std::result::Result<
+                ::wee_events_restate::EntityResponse,
+                ::wee_events_restate::__private::errors::HandlerError,
+            > {
+                let env = (&self.factory)()
+                    .await
+                    .map_err(::wee_events_restate::__private::to_handler_error)?;
+                let id = ctx
+                    .key()
+                    .parse::<::wee_events::AggregateId>()
+                    .map_err(|e| {
+                        ::wee_events_restate::__private::errors::TerminalError::new(e.to_string())
+                    })?;
+                let entity = #loader_fn_path::<__R>(&env, &id)
+                    .await
+                    .map_err(::wee_events_restate::__private::to_handler_error)?;
+                ::wee_events_restate::__private::to_entity_response(entity)
+            }
+
+            #(#binder_impl_methods)*
+        }
+
+        impl #name {
+            #vis fn restate<__F>(factory: __F) -> #binding_name<__F> {
+                #binding_name { factory }
+            }
+        }
+    };
+
     let definition_impls = quote! {
         impl ::wee_events::ServiceDefinition for #name {
             type State = #state_type;
@@ -685,5 +899,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         #loader_spec_assertion
 
         #definition_impls
+
+        #binder
     }
 }

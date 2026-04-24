@@ -21,6 +21,7 @@ ulid = { version = "1", features = ["serde"] }
 wee-events-macros = { path = "../wee-events-macros" }
 
 [dev-dependencies]
+restate-sdk = "0.9"
 wee-events = { path = ".", features = ["testing"] }
 wee-events-restate = { path = "../wee-events-restate" }
 tokio = { workspace = true }
