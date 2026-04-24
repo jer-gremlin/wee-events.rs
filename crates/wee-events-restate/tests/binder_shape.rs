@@ -54,3 +54,47 @@ fn binding_can_be_constructed_and_bound() {
     let binding = CounterService::restate(|| async { Ok(Env) });
     let _endpoint = Endpoint::builder().bind(binding.serve()).build();
 }
+
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WeirdCounter;
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct WeirdInc;
+impl Command for WeirdInc {
+    const NAME: &'static str = "weird:increment";
+}
+
+#[wee_events::loader]
+async fn weird_load<R: Send + Sync + 'static>(
+    _env: &R,
+    id: &AggregateId,
+) -> wee_events::Result<Entity<WeirdCounter>> {
+    Ok(Entity {
+        aggregate_id: id.clone(),
+        revision: Revision::zero(),
+        state: WeirdCounter,
+    })
+}
+
+#[wee_events::handler(command = WeirdInc)]
+async fn weird_inc<R: Send + Sync + 'static>(
+    _env: &R,
+    e: &Entity<WeirdCounter>,
+    _cmd: WeirdInc,
+) -> wee_events::Result<Entity<WeirdCounter>> {
+    Ok(e.clone())
+}
+
+wee_events::service! {
+    pub WeirdCounterService("weird-counter") for WeirdCounter {
+        loader: weird_load as "type",
+        handlers: [weird_inc as "weird_load"],
+    }
+}
+
+#[test]
+fn binding_internal_method_names_do_not_collide_with_wire_names() {
+    use restate_sdk::prelude::*;
+    let binding = WeirdCounterService::restate(|| async { Ok(Env) });
+    let _endpoint = Endpoint::builder().bind(binding.serve()).build();
+}
