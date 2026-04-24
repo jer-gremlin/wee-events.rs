@@ -5,6 +5,7 @@ members = [
     "crates/wee-events",
     "crates/wee-events-sqlite",
     "crates/wee-events-restate",
+    "examples/restate-counter",
 ]
 
 [workspace.package]
