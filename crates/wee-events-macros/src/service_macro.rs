@@ -307,6 +307,53 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         handler_entries,
     } = service;
 
+    // Effective Restate method name for the loader.
+    let loader_wire_name = loader_entry
+        .wire_name
+        .as_ref()
+        .map(|l| l.value())
+        .unwrap_or_else(|| "load".to_string());
+
+    // Effective Restate method name for each handler, in input order.
+    let handler_wire_names: Vec<String> = handler_entries
+        .iter()
+        .map(|e| match &e.wire_name {
+            Some(lit) => lit.value(),
+            None => to_snake_case(
+                &e.fn_path
+                    .segments
+                    .last()
+                    .expect("fn path has at least one segment")
+                    .ident
+                    .to_string(),
+            ),
+        })
+        .collect();
+
+    // Collision check: loader name must not collide with any handler name.
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(loader_wire_name.clone());
+    for (entry, wire) in handler_entries.iter().zip(handler_wire_names.iter()) {
+        if !seen.insert(wire.clone()) {
+            return syn::Error::new_spanned(
+                &entry.fn_path,
+                format!(
+                    "wire name `{wire}` collides with another handler or with the reserved loader name `{loader}`. \
+                     Use `{fn} as \"…\"` to pick a different wire name.",
+                    wire = wire,
+                    loader = loader_wire_name,
+                    fn = entry
+                        .fn_path
+                        .segments
+                        .last()
+                        .map(|s| s.ident.to_string())
+                        .unwrap_or_default(),
+                ),
+            )
+            .to_compile_error();
+        }
+    }
+
     let loader_fn_path = &loader_entry.fn_path;
     let total = handler_entries.len();
 
