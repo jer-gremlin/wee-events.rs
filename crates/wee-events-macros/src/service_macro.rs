@@ -318,88 +318,6 @@ fn compute_idx(input_index: usize, total: usize) -> TokenStream2 {
     idx
 }
 
-fn is_rust_identifier(s: &str) -> bool {
-    let mut chars = s.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    if !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
-        return false;
-    }
-    !matches!(
-        s,
-        "abstract"
-            | "as"
-            | "async"
-            | "await"
-            | "become"
-            | "box"
-            | "break"
-            | "const"
-            | "continue"
-            | "crate"
-            | "do"
-            | "dyn"
-            | "else"
-            | "enum"
-            | "extern"
-            | "false"
-            | "final"
-            | "fn"
-            | "for"
-            | "gen"
-            | "if"
-            | "impl"
-            | "in"
-            | "let"
-            | "loop"
-            | "macro"
-            | "match"
-            | "mod"
-            | "move"
-            | "mut"
-            | "override"
-            | "priv"
-            | "pub"
-            | "ref"
-            | "return"
-            | "Self"
-            | "self"
-            | "static"
-            | "struct"
-            | "super"
-            | "trait"
-            | "true"
-            | "try"
-            | "type"
-            | "typeof"
-            | "union"
-            | "unsized"
-            | "unsafe"
-            | "use"
-            | "virtual"
-            | "where"
-            | "while"
-            | "yield"
-    )
-}
-
-fn method_ident_for(wire_name: &str, fn_path: &Path) -> Ident {
-    if is_rust_identifier(wire_name) {
-        format_ident!("{}", wire_name)
-    } else {
-        fn_path
-            .segments
-            .last()
-            .expect("fn path has at least one segment")
-            .ident
-            .clone()
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Code generation
 // ---------------------------------------------------------------------------
@@ -738,15 +656,15 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     let binder_trait_name = format_ident!("{}Binder", name);
     let binding_name = format_ident!("{}Binding", name);
     let loader_wire_name_lit = LitStr::new(&loader_wire_name, proc_macro2::Span::call_site());
-    let loader_method_ident = method_ident_for(&loader_wire_name, loader_fn_path);
+    let loader_method_ident = format_ident!("__wee_events_load");
     let handler_wire_name_lits: Vec<LitStr> = handler_wire_names
         .iter()
         .map(|wire| LitStr::new(wire, proc_macro2::Span::call_site()))
         .collect();
-    let handler_method_idents: Vec<Ident> = handler_wire_names
+    let handler_method_idents: Vec<Ident> = handler_entries
         .iter()
-        .zip(handler_fn_paths.iter())
-        .map(|(wire, fn_path)| method_ident_for(wire, fn_path))
+        .enumerate()
+        .map(|(i, _)| format_ident!("__wee_events_handler_{}", i))
         .collect();
 
     let binder_trait_methods: Vec<TokenStream2> = handler_method_idents
