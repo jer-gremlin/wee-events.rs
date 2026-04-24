@@ -390,35 +390,6 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     #(#with_handler_calls)*
                     .build(factory)
             }
-
-            /// Build a Restate-harness service using the given factory to
-            /// construct the environment per-request from a Restate
-            /// `Context<'_>`.
-            ///
-            /// The returned value implements `RestateDispatch`, which the
-            /// Restate server binder consumes to wire durable `load` and
-            /// `execute` operations. Dispatch routing reuses the same
-            /// `HandlerList` HList as the portable path — the only
-            /// harness-specific piece is the factory signature.
-            #vis fn restate<__R, __F, __Fut>(factory: __F)
-                -> impl ::wee_events_restate::RestateDispatch
-            where
-                __R: #env_trait_name,
-                __F: for<'__ctx> ::std::ops::Fn(
-                        &'__ctx ::wee_events_restate::__private::Context<'__ctx>,
-                    ) -> __Fut
-                    + ::std::marker::Send
-                    + ::std::marker::Sync
-                    + 'static,
-                __Fut: ::std::future::Future<Output = wee_events::Result<__R>>
-                    + ::std::marker::Send
-                    + 'static,
-            {
-                wee_events::ServiceBuilder::<#state_type>::new()
-                    .with_loader(#loader_fn::<__R>)
-                    #(#with_handler_calls)*
-                    .build_raw::<__R, __F>(factory)
-            }
         }
     };
 
