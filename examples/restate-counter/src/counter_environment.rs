@@ -1,58 +1,71 @@
-use wee_events::{AggregateId, Entity, Revision};
+use wee_events::{Aggregate, AggregateId, ChangeSet, Revision};
 
-use crate::counter_repository::CounterRepository;
+use crate::counter_loader::CounterLoader;
+use crate::counter_publisher::CounterPublisher;
 use crate::events::CounterEvent;
-use crate::randomizer::Randomizer;
-use crate::state::Counter;
+use crate::randomiser::Randomiser;
 
 #[derive(Clone)]
-pub struct CounterEnvironment<Repository, Randomness> {
-    repository: Repository,
-    randomizer: Randomness,
+pub struct CounterEnvironment<Loader, Publisher, Randomness> {
+    loader: Loader,
+    publisher: Publisher,
+    randomiser: Randomness,
 }
 
-impl<Repository, Randomness> CounterEnvironment<Repository, Randomness> {
-    pub fn new(repository: Repository, randomizer: Randomness) -> Self {
+impl<Loader, Publisher, Randomness> CounterEnvironment<Loader, Publisher, Randomness> {
+    pub fn new(loader: Loader, publisher: Publisher, randomiser: Randomness) -> Self {
         Self {
-            repository,
-            randomizer,
+            loader,
+            publisher,
+            randomiser,
         }
     }
 }
 
-impl<Repository, Randomness> CounterRepository for CounterEnvironment<Repository, Randomness>
+impl<Loader, Publisher, Randomness> CounterLoader
+    for CounterEnvironment<Loader, Publisher, Randomness>
 where
-    Repository: CounterRepository,
+    Loader: CounterLoader,
+    Publisher: Send + Sync,
     Randomness: Send + Sync,
 {
     fn load_counter(
         &self,
         id: &AggregateId,
-    ) -> impl std::future::Future<Output = wee_events::Result<Entity<Counter>>> + Send {
-        self.repository.load_counter(id)
+    ) -> impl std::future::Future<Output = wee_events::Result<Aggregate>> + Send {
+        self.loader.load_counter(id)
     }
+}
 
+impl<Loader, Publisher, Randomness> CounterPublisher
+    for CounterEnvironment<Loader, Publisher, Randomness>
+where
+    Loader: Send + Sync,
+    Publisher: CounterPublisher,
+    Randomness: Send + Sync,
+{
     fn publish_counter_events(
         &self,
         id: AggregateId,
         expected_revision: Revision,
         events: Vec<CounterEvent>,
-    ) -> impl std::future::Future<Output = wee_events::Result<Entity<Counter>>> + Send {
-        self.repository
+    ) -> impl std::future::Future<Output = wee_events::Result<ChangeSet>> + Send {
+        self.publisher
             .publish_counter_events(id, expected_revision, events)
     }
 }
 
-impl<Repository, Randomness> Randomizer for CounterEnvironment<Repository, Randomness>
+impl<Loader, Publisher, Randomness> Randomiser for CounterEnvironment<Loader, Publisher, Randomness>
 where
-    Repository: Send + Sync,
-    Randomness: Randomizer,
+    Loader: Send + Sync,
+    Publisher: Send + Sync,
+    Randomness: Randomiser,
 {
     fn random_amount(
         &self,
         min: i64,
         max: i64,
     ) -> impl std::future::Future<Output = wee_events::Result<i64>> + Send {
-        self.randomizer.random_amount(min, max)
+        self.randomiser.random_amount(min, max)
     }
 }
