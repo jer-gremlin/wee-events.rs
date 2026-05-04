@@ -1,42 +1,29 @@
 use std::sync::Arc;
 
-use wee_events::{AggregateId, Entity, EventStore, PublishOptions, Revision};
+use wee_events::{AggregateId, ChangeSet, EventStore, PublishOptions, Revision};
 use wee_events_sqlite::SqliteEventStore;
 
-use crate::counter_repository::CounterRepository;
+use crate::counter_publisher::CounterPublisher;
 use crate::events::CounterEvent;
-use crate::state::{Counter, renderer};
 
 #[derive(Clone)]
-pub struct SqliteCounterRepository {
+pub struct SqliteCounterPublisher {
     store: Arc<SqliteEventStore>,
 }
 
-impl SqliteCounterRepository {
+impl SqliteCounterPublisher {
     pub fn new(store: Arc<SqliteEventStore>) -> Self {
         Self { store }
     }
 }
 
-impl CounterRepository for SqliteCounterRepository {
-    fn load_counter(
-        &self,
-        id: &AggregateId,
-    ) -> impl std::future::Future<Output = wee_events::Result<Entity<Counter>>> + Send {
-        let store = Arc::clone(&self.store);
-        let id = id.clone();
-        async move {
-            let aggregate = store.load(&id).await?;
-            renderer().render(&aggregate)
-        }
-    }
-
+impl CounterPublisher for SqliteCounterPublisher {
     fn publish_counter_events(
         &self,
         id: AggregateId,
         expected_revision: Revision,
         events: Vec<CounterEvent>,
-    ) -> impl std::future::Future<Output = wee_events::Result<Entity<Counter>>> + Send {
+    ) -> impl std::future::Future<Output = wee_events::Result<ChangeSet>> + Send {
         let store = Arc::clone(&self.store);
         async move {
             let raw_events = events
@@ -52,9 +39,7 @@ impl CounterRepository for SqliteCounterRepository {
                     },
                     raw_events,
                 )
-                .await?;
-            let aggregate = store.load(&id).await?;
-            renderer().render(&aggregate)
+                .await
         }
     }
 }

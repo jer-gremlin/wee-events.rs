@@ -1,9 +1,9 @@
-use crate::randomizer::Randomizer;
+use crate::randomiser::Randomiser;
 
 #[derive(Clone)]
-pub struct SystemRandomizer;
+pub struct SystemRandomiser;
 
-impl Randomizer for SystemRandomizer {
+impl Randomiser for SystemRandomiser {
     async fn random_amount(&self, min: i64, max: i64) -> wee_events::Result<i64> {
         let (low, high) = if min <= max { (min, max) } else { (max, min) };
         let span = (high - low + 1) as u128;
