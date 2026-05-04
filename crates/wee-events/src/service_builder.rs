@@ -10,7 +10,7 @@
 //! ## Handler signature
 //!
 //! ```ignore
-//! async fn my_handler(ctx: &Ctx, entity: &Entity<S>, cmd: C) -> crate::Result<Entity<S>>
+//! async fn my_handler(ctx: &Ctx, entity: &Entity<S>, cmd: C) -> crate::Result<()>
 //! ```
 //!
 //! ## Example
@@ -40,6 +40,29 @@ use crate::Command;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+#[doc(hidden)]
+pub enum HandlerOutcome<S> {
+    Entity(Entity<S>),
+    Reload,
+}
+
+#[doc(hidden)]
+pub trait IntoHandlerOutcome<S> {
+    fn into_handler_outcome(self) -> crate::Result<HandlerOutcome<S>>;
+}
+
+impl<S> IntoHandlerOutcome<S> for crate::Result<Entity<S>> {
+    fn into_handler_outcome(self) -> crate::Result<HandlerOutcome<S>> {
+        self.map(HandlerOutcome::Entity)
+    }
+}
+
+impl<S> IntoHandlerOutcome<S> for crate::Result<()> {
+    fn into_handler_outcome(self) -> crate::Result<HandlerOutcome<S>> {
+        self.map(|()| HandlerOutcome::Reload)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // HandlerBridge — lifetime-polymorphic glue.
 //
@@ -55,23 +78,25 @@ pub trait HandlerBridge<'a, Ctx: 'a, S: 'a, C>: Sized {
         ctx: &'a Ctx,
         entity: &'a Entity<S>,
         cmd: C,
-    ) -> BoxFuture<'a, crate::Result<Entity<S>>>;
+    ) -> BoxFuture<'a, crate::Result<HandlerOutcome<S>>>;
 }
 
-impl<'a, Ctx, S, C, F, Fut> HandlerBridge<'a, Ctx, S, C> for &'a F
+impl<'a, Ctx, S, C, F, Fut, Output> HandlerBridge<'a, Ctx, S, C> for &'a F
 where
-    Ctx: 'a,
-    S: 'a,
-    F: Fn(&'a Ctx, &'a Entity<S>, C) -> Fut,
-    Fut: Future<Output = crate::Result<Entity<S>>> + Send + 'a,
+    Ctx: Sync + 'a,
+    S: Sync + 'a,
+    C: Send + 'a,
+    F: Fn(&'a Ctx, &'a Entity<S>, C) -> Fut + Sync,
+    Fut: Future<Output = Output> + Send + 'a,
+    Output: IntoHandlerOutcome<S> + 'a,
 {
     fn call(
         f: Self,
         ctx: &'a Ctx,
         entity: &'a Entity<S>,
         cmd: C,
-    ) -> BoxFuture<'a, crate::Result<Entity<S>>> {
-        Box::pin(f(ctx, entity, cmd))
+    ) -> BoxFuture<'a, crate::Result<HandlerOutcome<S>>> {
+        Box::pin(async move { f(ctx, entity, cmd).await.into_handler_outcome() })
     }
 }
 
@@ -178,7 +203,7 @@ pub trait HandleCommand<C, Idx, Ctx, S> {
         ctx: &'a Ctx,
         entity: &'a Entity<S>,
         cmd: C,
-    ) -> BoxFuture<'a, crate::Result<Entity<S>>>;
+    ) -> BoxFuture<'a, crate::Result<HandlerOutcome<S>>>;
 }
 
 /// `C` is the head of this list — invoke directly.
@@ -195,7 +220,7 @@ where
         ctx: &'a Ctx,
         entity: &'a Entity<S>,
         cmd: C,
-    ) -> BoxFuture<'a, crate::Result<Entity<S>>> {
+    ) -> BoxFuture<'a, crate::Result<HandlerOutcome<S>>> {
         <&'a H as HandlerBridge<'a, Ctx, S, C>>::call(&self.handler, ctx, entity, cmd)
     }
 }
@@ -211,7 +236,7 @@ where
         ctx: &'a Ctx,
         entity: &'a Entity<S>,
         cmd: C,
-    ) -> BoxFuture<'a, crate::Result<Entity<S>>> {
+    ) -> BoxFuture<'a, crate::Result<HandlerOutcome<S>>> {
         self.tail.handle(ctx, entity, cmd)
     }
 }
@@ -301,7 +326,12 @@ where
         async move {
             let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory).await?;
             let entity = <&L as LoaderBridge<'_, Ctx, S>>::call(&self.loader, &ctx, &id).await?;
-            self.handlers.handle(&ctx, &entity, cmd).await
+            match self.handlers.handle(&ctx, &entity, cmd).await? {
+                HandlerOutcome::Entity(entity) => Ok(entity),
+                HandlerOutcome::Reload => {
+                    <&L as LoaderBridge<'_, Ctx, S>>::call(&self.loader, &ctx, &id).await
+                }
+            }
         }
     }
 }
@@ -374,7 +404,7 @@ impl<S, L, Handlers> ServiceBuilder<S, L, Handlers> {
 
     /// Register a typed async handler for command `C`.
     ///
-    /// Signature: `async fn(ctx: &Ctx, entity: &Entity<S>, cmd: C) -> crate::Result<Entity<S>>`
+    /// Signature: `async fn(ctx: &Ctx, entity: &Entity<S>, cmd: C) -> crate::Result<()>`
     ///
     /// Each call prepends a new `HandlerList<C, H, Tail>` node, so the compiler
     /// tracks which commands are registered in the type.

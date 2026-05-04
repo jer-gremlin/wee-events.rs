@@ -27,7 +27,7 @@ pub fn capability(args: TokenStream, input: TokenStream) -> TokenStream {
 ///     env: &R,
 ///     entity: &wee_events::Entity<MyState>,
 ///     cmd: MyCommand,
-/// ) -> wee_events::Result<wee_events::Entity<MyState>> { ... }
+/// ) -> wee_events::Result<()> { ... }
 /// ```
 ///
 /// Emits:

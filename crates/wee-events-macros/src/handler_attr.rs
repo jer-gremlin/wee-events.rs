@@ -6,7 +6,7 @@ use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Error, GenericArgument, ItemFn, Path, PathArguments, ReturnType, Token, Type,
+    Error, FnArg, GenericArgument, ItemFn, PatType, Path, PathArguments, ReturnType, Token, Type,
 };
 
 // ---------------------------------------------------------------------------
@@ -71,20 +71,18 @@ impl Parse for HandlerArgs {
 // State extraction from return type
 // ---------------------------------------------------------------------------
 
-/// Extract the `State` from `wee_events::Result<Entity<State>>` or
-/// `wee_events::Result<wee_events::Entity<State>>`.
-fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
+fn result_ok_type(return_type: &ReturnType) -> syn::Result<&Type> {
     let ReturnType::Type(_, box_ty) = return_type else {
         return Err(Error::new(
             proc_macro2::Span::call_site(),
-            "handler must return `wee_events::Result<Entity<State>>`",
+            "handler must return `wee_events::Result<()>` or `wee_events::Result<Entity<State>>`",
         ));
     };
 
     let Type::Path(type_path) = box_ty.as_ref() else {
         return Err(Error::new_spanned(
             box_ty.as_ref(),
-            "handler must return `wee_events::Result<Entity<State>>`",
+            "handler must return `wee_events::Result<()>` or `wee_events::Result<Entity<State>>`",
         ));
     };
 
@@ -93,14 +91,14 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
     let last_seg = type_path.path.segments.last().ok_or_else(|| {
         Error::new_spanned(
             box_ty.as_ref(),
-            "handler must return `wee_events::Result<Entity<State>>`",
+            "handler must return `wee_events::Result<()>` or `wee_events::Result<Entity<State>>`",
         )
     })?;
 
     if last_seg.ident != "Result" {
         return Err(Error::new_spanned(
             box_ty.as_ref(),
-            "handler must return `wee_events::Result<Entity<State>>`",
+            "handler must return `wee_events::Result<()>` or `wee_events::Result<Entity<State>>`",
         ));
     }
 
@@ -108,11 +106,11 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
     let PathArguments::AngleBracketed(result_args) = &last_seg.arguments else {
         return Err(Error::new_spanned(
             box_ty.as_ref(),
-            "handler must return `wee_events::Result<Entity<State>>`",
+            "handler must return `wee_events::Result<()>` or `wee_events::Result<Entity<State>>`",
         ));
     };
 
-    let entity_ty = result_args
+    result_args
         .args
         .iter()
         .find_map(|arg| {
@@ -125,37 +123,28 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
         .ok_or_else(|| {
             Error::new_spanned(
                 box_ty.as_ref(),
-                "handler must return `wee_events::Result<Entity<State>>`",
+                "handler must return `wee_events::Result<()>` or `wee_events::Result<Entity<State>>`",
             )
-        })?;
+        })
+}
 
-    // Now extract State from Entity<State>
+fn extract_state_from_entity_type(entity_ty: &Type) -> syn::Result<Type> {
     let Type::Path(entity_path) = entity_ty else {
-        return Err(Error::new_spanned(
-            entity_ty,
-            "handler must return `wee_events::Result<Entity<State>>`",
-        ));
+        return Err(Error::new_spanned(entity_ty, "expected `Entity<State>`"));
     };
 
-    let entity_seg = entity_path.path.segments.last().ok_or_else(|| {
-        Error::new_spanned(
-            entity_ty,
-            "handler must return `wee_events::Result<Entity<State>>`",
-        )
-    })?;
+    let entity_seg = entity_path
+        .path
+        .segments
+        .last()
+        .ok_or_else(|| Error::new_spanned(entity_ty, "expected `Entity<State>`"))?;
 
     if entity_seg.ident != "Entity" {
-        return Err(Error::new_spanned(
-            entity_ty,
-            "handler must return `wee_events::Result<Entity<State>>`",
-        ));
+        return Err(Error::new_spanned(entity_ty, "expected `Entity<State>`"));
     }
 
     let PathArguments::AngleBracketed(entity_args) = &entity_seg.arguments else {
-        return Err(Error::new_spanned(
-            entity_ty,
-            "handler must return `wee_events::Result<Entity<State>>`",
-        ));
+        return Err(Error::new_spanned(entity_ty, "expected `Entity<State>`"));
     };
 
     let state_ty = entity_args
@@ -168,14 +157,46 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
                 None
             }
         })
-        .ok_or_else(|| {
-            Error::new_spanned(
-                entity_ty,
-                "handler must return `wee_events::Result<Entity<State>>`",
-            )
-        })?;
+        .ok_or_else(|| Error::new_spanned(entity_ty, "expected `Entity<State>`"))?;
 
     Ok(state_ty)
+}
+
+fn is_unit_type(ty: &Type) -> bool {
+    matches!(ty, Type::Tuple(tuple) if tuple.elems.is_empty())
+}
+
+fn extract_entity_arg_state(func: &ItemFn) -> syn::Result<Type> {
+    for input in &func.sig.inputs {
+        let FnArg::Typed(PatType { ty, .. }) = input else {
+            continue;
+        };
+        let Type::Reference(reference) = ty.as_ref() else {
+            continue;
+        };
+        if let Ok(state_ty) = extract_state_from_entity_type(&reference.elem) {
+            return Ok(state_ty);
+        }
+    }
+
+    Err(Error::new_spanned(
+        &func.sig,
+        "handler returning `wee_events::Result<()>` must take an `&Entity<State>` argument",
+    ))
+}
+
+fn extract_state_type(func: &ItemFn) -> syn::Result<Type> {
+    let ok_ty = result_ok_type(&func.sig.output)?;
+    if is_unit_type(ok_ty) {
+        extract_entity_arg_state(func)
+    } else {
+        extract_state_from_entity_type(ok_ty).map_err(|_| {
+            Error::new_spanned(
+                ok_ty,
+                "handler must return `wee_events::Result<()>` or `wee_events::Result<Entity<State>>`",
+            )
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +222,7 @@ fn expand_inner(args: HandlerArgs, func: ItemFn) -> syn::Result<TokenStream2> {
         ));
     }
 
-    let state_ty = extract_state_type(&func.sig.output)?;
+    let state_ty = extract_state_type(&func)?;
 
     let fn_name = &func.sig.ident;
     let vis = &func.vis;

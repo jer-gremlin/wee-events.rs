@@ -41,6 +41,8 @@ pub use service_builder::{BuiltService, ServiceBuilder};
 pub use service_builder::{EmptyHandlers, Here, There};
 #[doc(hidden)]
 pub use service_builder::{FactoryBridge, HandleCommand, HandlerBridge, HandlerList, LoaderBridge};
+#[doc(hidden)]
+pub use service_builder::{HandlerOutcome, IntoHandlerOutcome};
 pub use spec::{HandlerSpec, LoaderSpec};
 pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{capability, handler, loader, service, Command, DomainEvent};
