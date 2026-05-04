@@ -1,10 +1,10 @@
 use wee_events::{AggregateId, Entity};
 
-use crate::audit::AuditLogClient;
 use crate::commands::{Increment, Randomise, Reset};
+use crate::environment::CounterRepository;
 use crate::events::CounterEvent;
 use crate::randomizer::Randomizer;
-use crate::runtime::CounterRepository;
+use crate::services::audit_log::AuditLogClient;
 use crate::state::Counter;
 
 #[wee_events::loader(requires(CounterRepository))]
