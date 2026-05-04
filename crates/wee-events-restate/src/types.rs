@@ -42,6 +42,14 @@ impl restate_sdk::serde::Serialize for EntityResponse {
     }
 }
 
+impl restate_sdk::serde::Deserialize for EntityResponse {
+    type Error = serde_json::Error;
+
+    fn deserialize(bytes: &mut bytes::Bytes) -> Result<Self, Self::Error> {
+        serde_json::from_slice(bytes)
+    }
+}
+
 impl restate_sdk::serde::PayloadMetadata for EntityResponse {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,4 +57,20 @@ pub struct ExecuteNotification {
     pub command: CommandRequest,
     pub response: EntityResponse,
     pub metadata: Metadata,
+}
+
+impl restate_sdk::serde::Serialize for ExecuteNotification {
+    type Error = serde_json::Error;
+
+    fn serialize(&self) -> Result<bytes::Bytes, Self::Error> {
+        serde_json::to_vec(self).map(bytes::Bytes::from)
+    }
+}
+
+impl restate_sdk::serde::Deserialize for ExecuteNotification {
+    type Error = serde_json::Error;
+
+    fn deserialize(bytes: &mut bytes::Bytes) -> Result<Self, Self::Error> {
+        serde_json::from_slice(bytes)
+    }
 }

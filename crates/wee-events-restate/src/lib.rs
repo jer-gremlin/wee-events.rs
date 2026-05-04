@@ -21,6 +21,30 @@ pub use names::{executor_name, loader_name, runner_name};
 pub use service::{JsonService, ServiceAdapter, ServiceResponse};
 pub use types::{CommandRequest, EntityResponse, ExecuteNotification, ExecuteRequest, Metadata};
 
+pub trait RestateServiceDefinition {
+    type Binding<Services>;
+
+    fn bind<Services>(services: Services) -> Self::Binding<Services>;
+}
+
+pub struct RestateServiceBuilder<Service> {
+    service: Service,
+}
+
+pub fn create<Service>(service: Service) -> RestateServiceBuilder<Service> {
+    RestateServiceBuilder { service }
+}
+
+impl<Service> RestateServiceBuilder<Service>
+where
+    Service: RestateServiceDefinition,
+{
+    pub fn with_env<Services>(self, services: Services) -> Service::Binding<Services> {
+        let _ = self.service;
+        Service::bind(services)
+    }
+}
+
 /// Hidden re-exports and helpers consumed by macro-generated code.
 #[doc(hidden)]
 pub mod __private {

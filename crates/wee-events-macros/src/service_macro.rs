@@ -469,12 +469,12 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         #[allow(non_camel_case_types)]
         #vis trait #env_trait_name:
             #(#all_requires_paths +)*
-            ::std::marker::Send + ::std::marker::Sync + 'static {}
+            ::std::marker::Send + ::std::marker::Sync {}
 
         impl<__T> #env_trait_name for __T
         where
             __T: #(#all_requires_paths +)*
-                 ::std::marker::Send + ::std::marker::Sync + 'static {}
+                 ::std::marker::Send + ::std::marker::Sync {}
     };
 
     // -----------------------------------------------------------------------
@@ -527,7 +527,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                 -> impl wee_events::TypedService<#state_type>
                        #(#handles_bounds)*
             where
-                __R: #env_trait_name,
+                __R: #env_trait_name + 'static,
                 __F: ::std::ops::Fn() -> __Fut
                     + ::std::marker::Send
                     + ::std::marker::Sync
@@ -559,7 +559,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                 >
                     for wee_events::BuiltService<__R, #state_type, __L, __F, __H>
                 where
-                    __R: #env_trait_name,
+                    __R: #env_trait_name + 'static,
                     __L: ::std::marker::Send + ::std::marker::Sync + 'static,
                     __F: ::std::marker::Send + ::std::marker::Sync + 'static,
                     __H: ::std::marker::Send + ::std::marker::Sync + 'static,
@@ -606,7 +606,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         impl<__R, __L, __F, __H> wee_events::TypedService<#state_type>
             for wee_events::BuiltService<__R, #state_type, __L, __F, __H>
         where
-            __R: #env_trait_name,
+            __R: #env_trait_name + 'static,
             __L: ::std::marker::Send + ::std::marker::Sync + 'static,
             __F: ::std::marker::Send + ::std::marker::Sync + 'static,
             __H: ::std::marker::Send + ::std::marker::Sync + 'static,
@@ -728,7 +728,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     let effect_client =
                         ::wee_events_restate::__private::context::ContextClient::workflow_client::<
                             #effect_client_ident<'_>,
-                        >(&ctx, correlation.clone());
+                        >(&ctx, notification.metadata.correlation_id.clone());
                     let _ = effect_client
                         .run(::wee_events_restate::__private::serde::Json(notification.clone()))
                         .send();
@@ -776,7 +776,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         .map(|((method_ident, fn_path), sp)| {
             let handle_command = if effect_entries.is_empty() {
                 quote! {
-                    let entity = #fn_path::<__R>(&env, &entity, command.into_inner())
+                    let entity = #fn_path(&env, &entity, command.into_inner())
                         .await
                         .map_err(::wee_events_restate::__private::to_handler_error)?;
                     ::wee_events_restate::__private::to_entity_response(entity)
@@ -785,7 +785,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                 quote! {
                     let command = command.into_inner();
                     let command_for_notification = command.clone();
-                    let entity = #fn_path::<__R>(&env, &entity, command)
+                    let entity = #fn_path(&env, &entity, command)
                         .await
                         .map_err(::wee_events_restate::__private::to_handler_error)?;
                     let response = ::wee_events_restate::__private::to_entity_response(entity)?;
@@ -813,8 +813,41 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                             idempotency_key: None,
                         },
                     };
+                    Ok(notification)
+                }
+            };
+
+            let run_result = if effect_entries.is_empty() {
+                quote! {
+                    ::wee_events_restate::__private::context::ContextSideEffects::run(
+                        &ctx,
+                        move || async move {
+                            let env = services;
+                            let entity = #loader_fn_path(&env, &id)
+                                .await
+                                .map_err(::wee_events_restate::__private::to_handler_error)?;
+                            #handle_command
+                        },
+                    )
+                    .await
+                    .map_err(::wee_events_restate::__private::errors::HandlerError::from)
+                }
+            } else {
+                quote! {
+                    let notification = ::wee_events_restate::__private::context::ContextSideEffects::run(
+                        &ctx,
+                        move || async move {
+                            let env = services;
+                            let entity = #loader_fn_path(&env, &id)
+                                .await
+                                .map_err(::wee_events_restate::__private::to_handler_error)?;
+                            #handle_command
+                        },
+                    )
+                    .await
+                    .map_err(::wee_events_restate::__private::errors::HandlerError::from)?;
                     #(#effect_dispatch_calls)*
-                    Ok(response)
+                    Ok(notification.response)
                 }
             };
 
@@ -829,19 +862,14 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     ::wee_events_restate::EntityResponse,
                     ::wee_events_restate::__private::errors::HandlerError,
                 > {
-                    let env = (&self.factory)()
-                        .await
-                        .map_err(::wee_events_restate::__private::to_handler_error)?;
                     let id = ctx
                         .key()
                         .parse::<::wee_events::AggregateId>()
                         .map_err(|e| {
                             ::wee_events_restate::__private::errors::TerminalError::new(e.to_string())
                         })?;
-                    let entity = #loader_fn_path::<__R>(&env, &id)
-                        .await
-                        .map_err(::wee_events_restate::__private::to_handler_error)?;
-                    #handle_command
+                    let services = self.services.clone();
+                    #run_result
                 }
             }
         })
@@ -862,19 +890,17 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
             #(#binder_trait_methods)*
         }
 
-        #vis struct #binding_name<__F> {
-            factory: __F,
+        #vis struct #binding_name<__Services> {
+            services: __Services,
         }
 
-        impl<__R, __F, __Fut> #binder_trait_name for #binding_name<__F>
+        impl<__Services> #binder_trait_name for #binding_name<__Services>
         where
-            __R: #env_trait_name,
-            __F: ::std::ops::Fn() -> __Fut
+            __Services:
+                #env_trait_name
+                + ::std::clone::Clone
                 + ::std::marker::Send
                 + ::std::marker::Sync
-                + 'static,
-            __Fut: ::std::future::Future<Output = ::wee_events::Result<__R>>
-                + ::std::marker::Send
                 + 'static,
             #state_type: ::serde::Serialize,
             #(#effect_command_bounds)*
@@ -886,28 +912,33 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                 ::wee_events_restate::EntityResponse,
                 ::wee_events_restate::__private::errors::HandlerError,
             > {
-                let env = (&self.factory)()
-                    .await
-                    .map_err(::wee_events_restate::__private::to_handler_error)?;
                 let id = ctx
                     .key()
                     .parse::<::wee_events::AggregateId>()
                     .map_err(|e| {
                         ::wee_events_restate::__private::errors::TerminalError::new(e.to_string())
                     })?;
-                let entity = #loader_fn_path::<__R>(&env, &id)
-                    .await
-                    .map_err(::wee_events_restate::__private::to_handler_error)?;
-                ::wee_events_restate::__private::to_entity_response(entity)
+                let services = self.services.clone();
+                ::wee_events_restate::__private::context::ContextSideEffects::run(
+                    &ctx,
+                    move || async move {
+                        let entity = #loader_fn_path(&services, &id)
+                            .await
+                            .map_err(::wee_events_restate::__private::to_handler_error)?;
+                        ::wee_events_restate::__private::to_entity_response(entity)
+                    },
+                )
+                .await
+                .map_err(::wee_events_restate::__private::errors::HandlerError::from)
             }
 
             #(#binder_impl_methods)*
         }
 
         impl #name {
-            #[doc = "Create a Restate binding for this service using the provided async environment factory."]
-            #vis fn restate<__F>(factory: __F) -> #binding_name<__F> {
-                #binding_name { factory }
+            #[doc = "Create a Restate binding for this service using replay-safe environment services."]
+            #vis fn restate<__Services>(services: __Services) -> #binding_name<__Services> {
+                #binding_name { services }
             }
         }
     };
@@ -928,6 +959,14 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                 ingress: impl Into<String>,
             ) -> ::wee_events_restate::RestateClient<Self> {
                 ::wee_events_restate::RestateClient::new(ingress)
+            }
+        }
+
+        impl ::wee_events_restate::RestateServiceDefinition for #name {
+            type Binding<__Services> = #binding_name<__Services>;
+
+            fn bind<__Services>(services: __Services) -> Self::Binding<__Services> {
+                #binding_name { services }
             }
         }
     };
