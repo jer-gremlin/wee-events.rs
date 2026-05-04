@@ -583,7 +583,12 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                         async move {
                             let ctx = <&__F as wee_events::FactoryBridge<'_, __R>>::call(&self.factory).await?;
                             let entity = <&__L as wee_events::LoaderBridge<'_, __R, #state_type>>::call(&self.loader, &ctx, &id).await?;
-                            self.handlers.handle(&ctx, &entity, cmd).await
+                            match self.handlers.handle(&ctx, &entity, cmd).await? {
+                                wee_events::HandlerOutcome::Entity(entity) => Ok(entity),
+                                wee_events::HandlerOutcome::Reload => {
+                                    <&__L as wee_events::LoaderBridge<'_, __R, #state_type>>::call(&self.loader, &ctx, &id).await
+                                }
+                            }
                         }
                     }
                 }
@@ -776,18 +781,36 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         .map(|((method_ident, fn_path), sp)| {
             let handle_command = if effect_entries.is_empty() {
                 quote! {
-                    let entity = #fn_path(&env, &entity, command.into_inner())
-                        .await
+                    let outcome = ::wee_events::IntoHandlerOutcome::into_handler_outcome(
+                        #fn_path(&env, &entity, command.into_inner()).await
+                    )
                         .map_err(::wee_events_restate::__private::to_handler_error)?;
+                    let entity = match outcome {
+                        ::wee_events::HandlerOutcome::Entity(entity) => entity,
+                        ::wee_events::HandlerOutcome::Reload => {
+                            #loader_fn_path(&env, &id)
+                                .await
+                                .map_err(::wee_events_restate::__private::to_handler_error)?
+                        }
+                    };
                     ::wee_events_restate::__private::to_entity_response(entity)
                 }
             } else {
                 quote! {
                     let command = command.into_inner();
                     let command_for_notification = command.clone();
-                    let entity = #fn_path(&env, &entity, command)
-                        .await
+                    let outcome = ::wee_events::IntoHandlerOutcome::into_handler_outcome(
+                        #fn_path(&env, &entity, command).await
+                    )
                         .map_err(::wee_events_restate::__private::to_handler_error)?;
+                    let entity = match outcome {
+                        ::wee_events::HandlerOutcome::Entity(entity) => entity,
+                        ::wee_events::HandlerOutcome::Reload => {
+                            #loader_fn_path(&env, &id)
+                                .await
+                                .map_err(::wee_events_restate::__private::to_handler_error)?
+                        }
+                    };
                     let response = ::wee_events_restate::__private::to_entity_response(entity)?;
                     let command_name = ::wee_events::CommandName::from(
                         <<#sp as ::wee_events::HandlerSpec>::Command as ::wee_events::Command>::NAME,

@@ -34,6 +34,13 @@ impl Command for Adjust {
     const NAME: &'static str = "counter:adjust";
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct Touch;
+
+impl Command for Touch {
+    const NAME: &'static str = "counter:touch";
+}
+
 // ---------------------------------------------------------------------------
 // Capability traits
 // ---------------------------------------------------------------------------
@@ -86,6 +93,15 @@ async fn adjust<R: HasRandomSource>(
     Ok(entity.clone())
 }
 
+#[wee_events::handler(command = Touch)]
+async fn touch<R: Send + Sync>(
+    _env: &R,
+    _entity: &Entity<Counter>,
+    _cmd: Touch,
+) -> wee_events::Result<()> {
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Service declaration — new syntax: bare function names
 // ---------------------------------------------------------------------------
@@ -93,7 +109,7 @@ async fn adjust<R: HasRandomSource>(
 wee_events::service! {
     pub CounterService for Counter {
         loader: load_counter,
-        handlers: [increment, adjust],
+        handlers: [increment, adjust, touch],
     }
 }
 
@@ -146,6 +162,14 @@ async fn portable_service_handles_multiple_commands() {
     // adjust is a no-op (returns entity unchanged)
     let entity = service.execute(&id, Adjust).await.unwrap();
     assert_eq!(entity.state.value, 0); // loader always returns default state
+}
+
+#[tokio::test]
+async fn portable_service_reloads_after_void_handler() {
+    let service = CounterService::portable(|| async { Ok(AppCtx) });
+    let id: AggregateId = "counter:c1".parse().unwrap();
+    let entity = service.execute(&id, Touch).await.unwrap();
+    assert_eq!(entity.state.value, 0);
 }
 
 /// A function that accepts any `TypedService<Counter>` implementation and
