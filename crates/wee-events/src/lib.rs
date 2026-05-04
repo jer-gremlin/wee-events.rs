@@ -43,7 +43,7 @@ pub use service_builder::{EmptyHandlers, Here, There};
 pub use service_builder::{FactoryBridge, HandleCommand, HandlerBridge, HandlerList, LoaderBridge};
 pub use spec::{HandlerSpec, LoaderSpec};
 pub use store::{EventStore, PublishOptions, RawEvent};
-pub use wee_events_macros::{handler, loader, service, Command, DomainEvent};
+pub use wee_events_macros::{capability, handler, loader, service, Command, DomainEvent};
 
 pub mod memory {
     pub use crate::memory_store::{MemoryStore, MemoryStoreBacking};

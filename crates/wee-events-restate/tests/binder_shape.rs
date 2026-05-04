@@ -46,12 +46,13 @@ wee_events::service! {
     }
 }
 
+#[derive(Clone)]
 struct Env;
 
 #[test]
 fn binding_can_be_constructed_and_bound() {
     use restate_sdk::prelude::*;
-    let binding = CounterService::restate(|| async { Ok(Env) });
+    let binding = wee_events_restate::create(CounterService).with_env(Env);
     let _endpoint = Endpoint::builder().bind(binding.serve()).build();
 }
 
@@ -95,6 +96,6 @@ wee_events::service! {
 #[test]
 fn binding_internal_method_names_do_not_collide_with_wire_names() {
     use restate_sdk::prelude::*;
-    let binding = WeirdCounterService::restate(|| async { Ok(Env) });
+    let binding = wee_events_restate::create(WeirdCounterService).with_env(Env);
     let _endpoint = Endpoint::builder().bind(binding.serve()).build();
 }

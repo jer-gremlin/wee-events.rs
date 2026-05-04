@@ -68,7 +68,7 @@ wee_events::service! {
 #[test]
 fn binding_compiles_with_effects() {
     use restate_sdk::prelude::*;
-    let binding = CounterService::restate(|| async { Ok(()) });
+    let binding = wee_events_restate::create(CounterService).with_env(());
     let _endpoint = Endpoint::builder()
         .bind(binding.serve())
         .bind(NotifierImpl.serve())

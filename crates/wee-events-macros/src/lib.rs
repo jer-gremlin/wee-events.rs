@@ -1,3 +1,4 @@
+mod capability_attr;
 mod handler_attr;
 mod loader_attr;
 mod service_macro;
@@ -6,6 +7,15 @@ use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};
+
+/// Annotates an environment capability trait and emits adapter glue.
+///
+/// Capability methods are ordinary domain dependencies. Async methods are
+/// shaped as `impl Future + Send` so they can be used from service handlers.
+#[proc_macro_attribute]
+pub fn capability(args: TokenStream, input: TokenStream) -> TokenStream {
+    capability_attr::expand(args, input)
+}
 
 /// Annotates a command handler function and emits a companion spec struct.
 ///
