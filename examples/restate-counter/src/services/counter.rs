@@ -1,19 +1,18 @@
 use wee_events::{AggregateId, Entity};
 
 use crate::commands::{Increment, Randomise, Reset};
-use crate::counter_loader::CounterLoader;
 use crate::counter_publisher::CounterPublisher;
 use crate::events::CounterEvent;
 use crate::randomiser::Randomiser;
 use crate::services::audit_log::AuditLogClient;
 use crate::state::{Counter, renderer};
 
-#[wee_events::loader(requires(CounterLoader))]
-pub async fn load<R: CounterLoader>(
-    env: &R,
+#[wee_events::loader(requires(wee_events::EventStore))]
+pub async fn load<R: wee_events::EventStore>(
+    store: &R,
     id: &AggregateId,
 ) -> wee_events::Result<Entity<Counter>> {
-    let aggregate = env.load_counter(id).await?;
+    let aggregate = store.load(id).await?;
     renderer().render(&aggregate)
 }
 
