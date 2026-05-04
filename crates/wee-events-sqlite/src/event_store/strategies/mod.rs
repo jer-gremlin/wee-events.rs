@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::future::Future;
 use std::hash::Hash;
 use std::path::Path;
 use wee_events::{AggregateId, AggregateType};
@@ -65,18 +66,17 @@ pub trait PartitionStrategy: Clone + Send + Sync + 'static {
 /// - other backends may use the name as an in-process routing key
 ///
 /// A partition name does not imply anything about on-disk filenames.
-#[allow(async_fn_in_trait)]
 pub trait PartitionNamingStrategy: PartitionStrategy {
     fn partition_name<'a>(&self, partition: &'a Self::Partition) -> PartitionName<'a>;
 
     fn partition_from_name(&self, name: &str) -> Result<Self::Partition, Error>;
 
-    async fn partition_from_target_name(
+    fn partition_from_target_name(
         &self,
         name: &str,
         _target: &DatabaseTarget,
-    ) -> Result<Option<Self::Partition>, Error> {
-        self.partition_from_name(name).map(Some)
+    ) -> impl Future<Output = Result<Option<Self::Partition>, Error>> + Send {
+        async { self.partition_from_name(name).map(Some) }
     }
 }
 

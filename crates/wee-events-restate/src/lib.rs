@@ -22,13 +22,37 @@ pub use service::{JsonService, ServiceAdapter, ServiceResponse};
 pub use types::{CommandRequest, EntityResponse, ExecuteNotification, ExecuteRequest, Metadata};
 
 pub trait RestateServiceDefinition {
-    type Binding<Services>;
+    type Binding<Store, Services>;
 
-    fn bind<Services>(services: Services) -> Self::Binding<Services>;
+    fn bind<Store, Services>(store: Store, services: Services) -> Self::Binding<Store, Services>;
 }
 
 pub struct RestateServiceBuilder<Service> {
     service: Service,
+}
+
+pub struct RestateServiceStoreBuilder<Service, Store> {
+    service: Service,
+    store: Store,
+}
+
+pub struct HandlerEnv<Store, Services> {
+    store: Store,
+    services: Services,
+}
+
+impl<Store, Services> HandlerEnv<Store, Services> {
+    pub fn new(store: Store, services: Services) -> Self {
+        Self { store, services }
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    pub fn services(&self) -> &Services {
+        &self.services
+    }
 }
 
 pub fn create<Service>(service: Service) -> RestateServiceBuilder<Service> {
@@ -39,9 +63,29 @@ impl<Service> RestateServiceBuilder<Service>
 where
     Service: RestateServiceDefinition,
 {
-    pub fn with_env<Services>(self, services: Services) -> Service::Binding<Services> {
+    pub fn with_store<Store>(self, store: Store) -> RestateServiceStoreBuilder<Service, Store> {
+        RestateServiceStoreBuilder {
+            service: self.service,
+            store,
+        }
+    }
+
+    pub fn with_env<Services>(self, services: Services) -> Service::Binding<Services, Services>
+    where
+        Services: Clone,
+    {
         let _ = self.service;
-        Service::bind(services)
+        Service::bind(services.clone(), services)
+    }
+}
+
+impl<Service, Store> RestateServiceStoreBuilder<Service, Store>
+where
+    Service: RestateServiceDefinition,
+{
+    pub fn with_env<Services>(self, services: Services) -> Service::Binding<Store, Services> {
+        let _ = self.service;
+        Service::bind(self.store, services)
     }
 }
 
