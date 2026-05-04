@@ -1,18 +1,17 @@
-mod audit;
 mod commands;
+mod environment;
 mod events;
 mod randomizer;
-mod runtime;
-mod service;
+mod services;
 mod state;
 
 use std::sync::Arc;
 
-use audit::{AuditLog, AuditLogImpl};
+use environment::AppServices;
 use randomizer::SystemRandomizer;
 use restate_sdk::prelude::*;
-use runtime::AppServices;
-use service::{CounterService, CounterServiceBinder};
+use services::audit_log::{AuditLog, AuditLogImpl};
+use services::counter::{CounterService, CounterServiceBinder};
 use wee_events_sqlite::{GlobalStrategy, SqliteEventStore};
 
 #[tokio::main]
