@@ -1,17 +1,21 @@
 mod commands;
-mod environment;
+mod counter_environment;
+mod counter_repository;
 mod events;
 mod randomizer;
 mod services;
+mod sqlite_counter_repository;
 mod state;
+mod system_randomizer;
 
 use std::sync::Arc;
 
-use environment::AppServices;
-use randomizer::SystemRandomizer;
+use counter_environment::CounterEnvironment;
 use restate_sdk::prelude::*;
 use services::audit_log::{AuditLog, AuditLogImpl};
 use services::counter::{CounterService, CounterServiceBinder};
+use sqlite_counter_repository::SqliteCounterRepository;
+use system_randomizer::SystemRandomizer;
 use wee_events_sqlite::{GlobalStrategy, SqliteEventStore};
 
 #[tokio::main]
@@ -26,13 +30,14 @@ async fn main() {
             .await
             .expect("event store should open"),
     );
-    let services = AppServices::new(store, SystemRandomizer);
+    let repository = SqliteCounterRepository::new(store);
+    let environment = CounterEnvironment::new(repository, SystemRandomizer);
 
     HttpServer::new(
         Endpoint::builder()
             .bind(
                 wee_events_restate::create(CounterService)
-                    .with_env(services)
+                    .with_env(environment)
                     .serve(),
             )
             .bind(AuditLogImpl.serve())

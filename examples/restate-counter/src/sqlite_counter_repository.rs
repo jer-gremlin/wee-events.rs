@@ -3,37 +3,22 @@ use std::sync::Arc;
 use wee_events::{AggregateId, Entity, EventStore, PublishOptions, Revision};
 use wee_events_sqlite::SqliteEventStore;
 
+use crate::counter_repository::CounterRepository;
 use crate::events::CounterEvent;
-use crate::randomizer::{Randomizer, SystemRandomizer};
 use crate::state::{Counter, renderer};
 
-pub trait CounterRepository: Send + Sync {
-    fn load_counter(
-        &self,
-        id: &AggregateId,
-    ) -> impl std::future::Future<Output = wee_events::Result<Entity<Counter>>> + Send;
-
-    fn publish_counter_events(
-        &self,
-        id: AggregateId,
-        expected_revision: Revision,
-        events: Vec<CounterEvent>,
-    ) -> impl std::future::Future<Output = wee_events::Result<Entity<Counter>>> + Send;
-}
-
 #[derive(Clone)]
-pub struct AppServices {
+pub struct SqliteCounterRepository {
     store: Arc<SqliteEventStore>,
-    randomizer: SystemRandomizer,
 }
 
-impl AppServices {
-    pub fn new(store: Arc<SqliteEventStore>, randomizer: SystemRandomizer) -> Self {
-        Self { store, randomizer }
+impl SqliteCounterRepository {
+    pub fn new(store: Arc<SqliteEventStore>) -> Self {
+        Self { store }
     }
 }
 
-impl CounterRepository for AppServices {
+impl CounterRepository for SqliteCounterRepository {
     fn load_counter(
         &self,
         id: &AggregateId,
@@ -71,15 +56,5 @@ impl CounterRepository for AppServices {
             let aggregate = store.load(&id).await?;
             renderer().render(&aggregate)
         }
-    }
-}
-
-impl Randomizer for AppServices {
-    fn random_amount(
-        &self,
-        min: i64,
-        max: i64,
-    ) -> impl std::future::Future<Output = wee_events::Result<i64>> + Send {
-        self.randomizer.random_amount(min, max)
     }
 }
