@@ -2,6 +2,32 @@ use restate_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use wee_events::{AggregateId, Command, Entity, Revision};
 
+pub trait CounterStore: Send + Sync {
+    fn load(
+        &self,
+        id: &AggregateId,
+    ) -> impl std::future::Future<Output = wee_events::Result<Entity<Counter>>> + Send;
+}
+
+#[derive(Clone)]
+struct FixedStore;
+
+impl CounterStore for FixedStore {
+    fn load(
+        &self,
+        id: &AggregateId,
+    ) -> impl std::future::Future<Output = wee_events::Result<Entity<Counter>>> + Send {
+        let id = id.clone();
+        async move {
+            Ok(Entity {
+                aggregate_id: id,
+                revision: Revision::zero(),
+                state: Counter::default(),
+            })
+        }
+    }
+}
+
 #[wee_events::capability]
 pub trait Randomizer {
     async fn amount(&self, min: i64, max: i64) -> wee_events::Result<i64>;
@@ -13,6 +39,20 @@ struct FixedRandomizer;
 impl Randomizer for FixedRandomizer {
     async fn amount(&self, _min: i64, max: i64) -> wee_events::Result<i64> {
         Ok(max)
+    }
+}
+
+impl<Store, Services> Randomizer for wee_events_restate::HandlerEnv<Store, Services>
+where
+    Store: Send + Sync,
+    Services: Randomizer,
+{
+    fn amount(
+        &self,
+        min: i64,
+        max: i64,
+    ) -> impl std::future::Future<Output = wee_events::Result<i64>> + Send {
+        self.services().amount(min, max)
     }
 }
 
@@ -31,13 +71,9 @@ impl Command for Randomise {
     const NAME: &'static str = "counter:randomise";
 }
 
-#[wee_events::loader]
-async fn load<R: Send + Sync>(_env: &R, id: &AggregateId) -> wee_events::Result<Entity<Counter>> {
-    Ok(Entity {
-        aggregate_id: id.clone(),
-        revision: Revision::zero(),
-        state: Counter::default(),
-    })
+#[wee_events::loader(requires(CounterStore))]
+async fn load<R: CounterStore>(store: &R, id: &AggregateId) -> wee_events::Result<Entity<Counter>> {
+    store.load(id).await
 }
 
 #[wee_events::handler(command = Randomise, requires(Randomizer))]
@@ -66,6 +102,7 @@ wee_events::service! {
 #[test]
 fn create_binds_services_inside_restate_run_boundary() {
     let binding = wee_events_restate::create(CounterService)
+        .with_store(FixedStore)
         .with_env(FixedRandomizer)
         .serve();
     let _endpoint = Endpoint::builder().bind(binding).build();

@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::path::PathBuf;
 
 use crate::Error;
@@ -50,58 +51,61 @@ impl std::fmt::Debug for DatabaseTarget {
     }
 }
 
-#[allow(async_fn_in_trait)]
 pub trait SingleTargetProvisioner: Send + Sync {
     /// Returns the single concrete target, creating or provisioning it if needed.
     ///
     /// Use this for backends where every logical partition is realized by the
     /// same external target, such as `sqld_default`.
-    async fn ensure_target(&self) -> Result<DatabaseTarget, Error>;
+    fn ensure_target(&self) -> impl Future<Output = Result<DatabaseTarget, Error>> + Send;
 
     /// Returns the single target if it already exists.
     ///
     /// This should avoid creating new storage as a side effect.
-    async fn existing_target(&self) -> Result<Option<DatabaseTarget>, Error>;
+    fn existing_target(&self)
+        -> impl Future<Output = Result<Option<DatabaseTarget>, Error>> + Send;
 }
 
-#[allow(async_fn_in_trait)]
 pub trait NamedTargetProvisioner: Send + Sync {
     /// Returns a target for a stable partition name, creating or provisioning it if needed.
     ///
     /// The partition name is a logical identifier supplied by
     /// `PartitionNamingStrategy`. Backends are free to translate that name
     /// into whatever concrete addressing scheme they need, such as a namespace.
-    async fn ensure_target_for_name(
+    fn ensure_target_for_name(
         &self,
         name: PartitionName<'_>,
-    ) -> Result<DatabaseTarget, Error>;
+    ) -> impl Future<Output = Result<DatabaseTarget, Error>> + Send;
 
     /// Returns a target for a stable partition name if it already exists.
     ///
     /// This should avoid creating new storage as a side effect.
-    async fn target_for_existing_name(
+    fn target_for_existing_name(
         &self,
         name: PartitionName<'_>,
-    ) -> Result<Option<DatabaseTarget>, Error>;
+    ) -> impl Future<Output = Result<Option<DatabaseTarget>, Error>> + Send;
 
     /// Enumerates partition names known to this provisioner.
-    async fn names(&self) -> Result<Vec<String>, Error> {
-        Ok(Vec::new())
+    fn names(&self) -> impl Future<Output = Result<Vec<String>, Error>> + Send {
+        async { Ok(Vec::new()) }
     }
 
     /// Enumerates existing backend targets keyed by their backend-facing names.
-    async fn named_targets(&self) -> Result<Vec<(String, DatabaseTarget)>, Error> {
-        let mut targets = Vec::new();
-        for name in self.names().await? {
-            let Some(target) = self
-                .target_for_existing_name(PartitionName::Named(&name))
-                .await?
-            else {
-                continue;
-            };
-            targets.push((name, target));
+    fn named_targets(
+        &self,
+    ) -> impl Future<Output = Result<Vec<(String, DatabaseTarget)>, Error>> + Send {
+        async move {
+            let mut targets = Vec::new();
+            for name in self.names().await? {
+                let Some(target) = self
+                    .target_for_existing_name(PartitionName::Named(&name))
+                    .await?
+                else {
+                    continue;
+                };
+                targets.push((name, target));
+            }
+            Ok(targets)
         }
-        Ok(targets)
     }
 }
 

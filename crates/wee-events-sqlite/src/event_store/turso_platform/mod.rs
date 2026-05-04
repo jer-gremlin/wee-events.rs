@@ -2,6 +2,7 @@ mod api;
 mod sanitize;
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Mutex;
 
 use futures_util::future::try_join_all;
@@ -14,15 +15,17 @@ use sanitize::{named_database_prefix, sanitize_database_name};
 use super::strategies::PartitionName;
 use super::types::{DatabaseTarget, NamedTargetProvisioner, TursoProvisioner};
 
-#[allow(async_fn_in_trait)]
 trait PartitionMetadataStore: Send + Sync {
-    async fn ensure_partition_name(
+    fn ensure_partition_name(
         &self,
         target: &DatabaseTarget,
         logical_name: &str,
-    ) -> Result<(), Error>;
+    ) -> impl Future<Output = Result<(), Error>> + Send;
 
-    async fn load_partition_name(&self, target: &DatabaseTarget) -> Result<Option<String>, Error>;
+    fn load_partition_name(
+        &self,
+        target: &DatabaseTarget,
+    ) -> impl Future<Output = Result<Option<String>, Error>> + Send;
 }
 
 #[derive(Debug, Clone, Copy, Default)]

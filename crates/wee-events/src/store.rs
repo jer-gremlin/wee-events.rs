@@ -1,6 +1,8 @@
 use crate::aggregate::Aggregate;
 use crate::event::{ChangeSet, EventData};
 use crate::id::{AggregateId, CorrelationId, EventId, EventType, Revision};
+use std::future::Future;
+use std::sync::Arc;
 
 /// Options for publishing events — optimistic concurrency, causation, correlation.
 #[derive(Debug, Clone, Default)]
@@ -23,17 +25,39 @@ pub struct RawEvent {
 ///
 /// Implementors provide the persistence mechanism (in-memory, SQLite, etc.).
 ///
-/// This trait is intended for static dispatch. Implementations and callers in
-/// this workspace use concrete store types, so native `async fn` keeps the API
-/// clear without reintroducing erased futures.
-#[allow(async_fn_in_trait)]
+/// This trait is intended for static dispatch. Methods return `Send` futures so
+/// generated durable adapters can hold store references across async boundaries.
 pub trait EventStore: Send + Sync {
-    async fn load(&self, id: &AggregateId) -> Result<Aggregate, crate::Error>;
+    fn load(
+        &self,
+        id: &AggregateId,
+    ) -> impl Future<Output = Result<Aggregate, crate::Error>> + Send;
 
-    async fn publish(
+    fn publish(
         &self,
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> Result<ChangeSet, crate::Error>;
+    ) -> impl Future<Output = Result<ChangeSet, crate::Error>> + Send;
+}
+
+impl<T> EventStore for Arc<T>
+where
+    T: EventStore + ?Sized,
+{
+    fn load(
+        &self,
+        id: &AggregateId,
+    ) -> impl Future<Output = Result<Aggregate, crate::Error>> + Send {
+        (**self).load(id)
+    }
+
+    fn publish(
+        &self,
+        aggregate_id: &AggregateId,
+        options: PublishOptions,
+        events: Vec<RawEvent>,
+    ) -> impl Future<Output = Result<ChangeSet, crate::Error>> + Send {
+        (**self).publish(aggregate_id, options, events)
+    }
 }

@@ -450,6 +450,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
 
     // Name for the generated service-specific env trait: {Name}Env
     let env_trait_name = format_ident!("{}Env", name);
+    let handler_env_trait_name = format_ident!("{}HandlerEnv", name);
 
     // All __Requires traits combined (loader + handlers)
     let all_requires_paths: Vec<&Path> = std::iter::once(&loader_requires_path)
@@ -474,6 +475,20 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         impl<__T> #env_trait_name for __T
         where
             __T: #(#all_requires_paths +)*
+                 ::std::marker::Send + ::std::marker::Sync {}
+
+        /// Handler environment contract for #name.
+        ///
+        /// Union of capability requirements declared by command handlers only.
+        /// Restate bindings supply loader requirements through the store.
+        #[allow(non_camel_case_types)]
+        #vis trait #handler_env_trait_name:
+            #(#handler_requires_paths +)*
+            ::std::marker::Send + ::std::marker::Sync {}
+
+        impl<__T> #handler_env_trait_name for __T
+        where
+            __T: #(#handler_requires_paths +)*
                  ::std::marker::Send + ::std::marker::Sync {}
     };
 
@@ -788,7 +803,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     let entity = match outcome {
                         ::wee_events::HandlerOutcome::Entity(entity) => entity,
                         ::wee_events::HandlerOutcome::Reload => {
-                            #loader_fn_path(&env, &id)
+                            #loader_fn_path(&store, &id)
                                 .await
                                 .map_err(::wee_events_restate::__private::to_handler_error)?
                         }
@@ -806,7 +821,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     let entity = match outcome {
                         ::wee_events::HandlerOutcome::Entity(entity) => entity,
                         ::wee_events::HandlerOutcome::Reload => {
-                            #loader_fn_path(&env, &id)
+                            #loader_fn_path(&store, &id)
                                 .await
                                 .map_err(::wee_events_restate::__private::to_handler_error)?
                         }
@@ -845,10 +860,12 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     ::wee_events_restate::__private::context::ContextSideEffects::run(
                         &ctx,
                         move || async move {
-                            let env = services;
-                            let entity = #loader_fn_path(&env, &id)
+                            let store = store;
+                            let services = services;
+                            let entity = #loader_fn_path(&store, &id)
                                 .await
                                 .map_err(::wee_events_restate::__private::to_handler_error)?;
+                            let env = ::wee_events_restate::HandlerEnv::new(store.clone(), services);
                             #handle_command
                         },
                     )
@@ -860,10 +877,12 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     let notification = ::wee_events_restate::__private::context::ContextSideEffects::run(
                         &ctx,
                         move || async move {
-                            let env = services;
-                            let entity = #loader_fn_path(&env, &id)
+                            let store = store;
+                            let services = services;
+                            let entity = #loader_fn_path(&store, &id)
                                 .await
                                 .map_err(::wee_events_restate::__private::to_handler_error)?;
+                            let env = ::wee_events_restate::HandlerEnv::new(store.clone(), services);
                             #handle_command
                         },
                     )
@@ -891,6 +910,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                         .map_err(|e| {
                             ::wee_events_restate::__private::errors::TerminalError::new(e.to_string())
                         })?;
+                    let store = self.store.clone();
                     let services = self.services.clone();
                     #run_result
                 }
@@ -913,18 +933,28 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
             #(#binder_trait_methods)*
         }
 
-        #vis struct #binding_name<__Services> {
+        #vis struct #binding_name<__Store, __Services> {
+            store: __Store,
             services: __Services,
         }
 
-        impl<__Services> #binder_trait_name for #binding_name<__Services>
+        impl<__Store, __Services> #binder_trait_name for #binding_name<__Store, __Services>
         where
-            __Services:
-                #env_trait_name
+            __Store:
+                #loader_requires_path
                 + ::std::clone::Clone
                 + ::std::marker::Send
                 + ::std::marker::Sync
                 + 'static,
+            __Services:
+                ::std::clone::Clone
+                + ::std::marker::Send
+                + ::std::marker::Sync
+                + 'static,
+            ::wee_events_restate::HandlerEnv<
+                __Store,
+                __Services,
+            >: #handler_env_trait_name,
             #state_type: ::serde::Serialize,
             #(#effect_command_bounds)*
         {
@@ -941,11 +971,12 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     .map_err(|e| {
                         ::wee_events_restate::__private::errors::TerminalError::new(e.to_string())
                     })?;
+                let store = self.store.clone();
                 let services = self.services.clone();
                 ::wee_events_restate::__private::context::ContextSideEffects::run(
                     &ctx,
                     move || async move {
-                        let entity = #loader_fn_path(&services, &id)
+                        let entity = #loader_fn_path(&store, &id)
                             .await
                             .map_err(::wee_events_restate::__private::to_handler_error)?;
                         ::wee_events_restate::__private::to_entity_response(entity)
@@ -960,8 +991,14 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
 
         impl #name {
             #[doc = "Create a Restate binding for this service using replay-safe environment services."]
-            #vis fn restate<__Services>(services: __Services) -> #binding_name<__Services> {
-                #binding_name { services }
+            #vis fn restate<__Services>(services: __Services) -> #binding_name<__Services, __Services>
+            where
+                __Services: ::std::clone::Clone,
+            {
+                #binding_name {
+                    store: services.clone(),
+                    services,
+                }
             }
         }
     };
@@ -986,10 +1023,13 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         }
 
         impl ::wee_events_restate::RestateServiceDefinition for #name {
-            type Binding<__Services> = #binding_name<__Services>;
+            type Binding<__Store, __Services> = #binding_name<__Store, __Services>;
 
-            fn bind<__Services>(services: __Services) -> Self::Binding<__Services> {
-                #binding_name { services }
+            fn bind<__Store, __Services>(
+                store: __Store,
+                services: __Services,
+            ) -> Self::Binding<__Store, __Services> {
+                #binding_name { store, services }
             }
         }
     };

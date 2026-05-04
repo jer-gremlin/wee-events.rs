@@ -30,12 +30,26 @@ impl std::fmt::Display for ApiError {
 ///
 /// The reqwest implementation ([`TursoHttpClient`]) is the production version;
 /// tests use [`FakeTursoPlatformApi`].
-#[allow(async_fn_in_trait)]
+use std::future::Future;
+
 pub trait TursoPlatformApi: Send + Sync {
-    async fn create_database(&self, name: &str, group: &str) -> Result<DatabaseInfo, ApiError>;
-    async fn get_database(&self, name: &str) -> Result<Option<DatabaseInfo>, ApiError>;
-    async fn list_databases(&self, group: &str) -> Result<Vec<DatabaseInfo>, ApiError>;
-    async fn delete_database(&self, name: &str) -> Result<(), ApiError>;
+    fn create_database(
+        &self,
+        name: &str,
+        group: &str,
+    ) -> impl Future<Output = Result<DatabaseInfo, ApiError>> + Send;
+
+    fn get_database(
+        &self,
+        name: &str,
+    ) -> impl Future<Output = Result<Option<DatabaseInfo>, ApiError>> + Send;
+
+    fn list_databases(
+        &self,
+        group: &str,
+    ) -> impl Future<Output = Result<Vec<DatabaseInfo>, ApiError>> + Send;
+
+    fn delete_database(&self, name: &str) -> impl Future<Output = Result<(), ApiError>> + Send;
 }
 
 impl<T: TursoPlatformApi> TursoPlatformApi for std::sync::Arc<T> {
