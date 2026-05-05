@@ -55,6 +55,18 @@ impl<Store, Services> HandlerEnv<Store, Services> {
     }
 }
 
+impl<Store, Services> wee_events::HasPublisher for HandlerEnv<Store, Services>
+where
+    Store: wee_events::EventStore,
+    Services: Send + Sync,
+{
+    type Store = Store;
+
+    fn publisher(&self) -> wee_events::Publisher<'_, Self::Store> {
+        wee_events::Publisher::new(self.store())
+    }
+}
+
 pub fn create<Service>(service: Service) -> RestateServiceBuilder<Service> {
     RestateServiceBuilder { service }
 }

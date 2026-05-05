@@ -1,7 +1,6 @@
 use wee_events::{AggregateId, Entity};
 
 use crate::commands::{Increment, Randomise, Reset};
-use crate::counter_publisher::CounterPublisher;
 use crate::events::CounterEvent;
 use crate::randomiser::Randomiser;
 use crate::services::audit_log::AuditLogClient;
@@ -16,25 +15,25 @@ pub async fn load<R: wee_events::EventStore>(
     renderer().render(&aggregate)
 }
 
-#[wee_events::handler(command = Increment, requires(CounterPublisher))]
-pub async fn increment<R: CounterPublisher>(
+#[wee_events::handler(command = Increment, requires(wee_events::HasPublisher))]
+pub async fn increment<R: wee_events::HasPublisher>(
     env: &R,
     entity: &Entity<Counter>,
     command: Increment,
 ) -> wee_events::Result<()> {
-    env.publish_counter_events(
-        entity.aggregate_id.clone(),
-        entity.revision.clone(),
-        vec![CounterEvent::Incremented {
-            amount: command.amount,
-        }],
-    )
-    .await?;
+    env.publisher()
+        .publish(
+            entity,
+            vec![CounterEvent::Incremented {
+                amount: command.amount,
+            }],
+        )
+        .await?;
     Ok(())
 }
 
-#[wee_events::handler(command = Reset, requires(CounterPublisher))]
-pub async fn reset<R: CounterPublisher>(
+#[wee_events::handler(command = Reset, requires(wee_events::HasPublisher))]
+pub async fn reset<R: wee_events::HasPublisher>(
     env: &R,
     entity: &Entity<Counter>,
     _command: Reset,
@@ -43,28 +42,22 @@ pub async fn reset<R: CounterPublisher>(
         return Ok(());
     }
 
-    env.publish_counter_events(
-        entity.aggregate_id.clone(),
-        entity.revision.clone(),
-        vec![CounterEvent::Reset],
-    )
-    .await?;
+    env.publisher()
+        .publish(entity, vec![CounterEvent::Reset])
+        .await?;
     Ok(())
 }
 
-#[wee_events::handler(command = Randomise, requires(CounterPublisher, Randomiser))]
-pub async fn randomise<R: CounterPublisher + Randomiser>(
+#[wee_events::handler(command = Randomise, requires(wee_events::HasPublisher, Randomiser))]
+pub async fn randomise<R: wee_events::HasPublisher + Randomiser>(
     env: &R,
     entity: &Entity<Counter>,
     command: Randomise,
 ) -> wee_events::Result<()> {
     let amount = env.random_amount(command.min, command.max).await?;
-    env.publish_counter_events(
-        entity.aggregate_id.clone(),
-        entity.revision.clone(),
-        vec![CounterEvent::Randomised { amount }],
-    )
-    .await?;
+    env.publisher()
+        .publish(entity, vec![CounterEvent::Randomised { amount }])
+        .await?;
     Ok(())
 }
 

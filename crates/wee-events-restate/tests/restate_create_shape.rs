@@ -1,6 +1,9 @@
 use restate_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use wee_events::{AggregateId, Command, Entity, Revision};
+use wee_events::{
+    Aggregate, AggregateId, ChangeSet, Command, DomainEvent, Entity, EventStore, PublishOptions,
+    RawEvent, Revision,
+};
 
 pub trait CounterStore: Send + Sync {
     fn load(
@@ -25,6 +28,25 @@ impl CounterStore for FixedStore {
                 state: Counter::default(),
             })
         }
+    }
+}
+
+impl EventStore for FixedStore {
+    async fn load(&self, id: &AggregateId) -> wee_events::Result<Aggregate> {
+        Ok(Aggregate::empty(id.clone()))
+    }
+
+    async fn publish(
+        &self,
+        aggregate_id: &AggregateId,
+        _options: PublishOptions,
+        _events: Vec<RawEvent>,
+    ) -> wee_events::Result<ChangeSet> {
+        Ok(ChangeSet {
+            aggregate_id: aggregate_id.clone(),
+            revision: Revision::zero(),
+            events: Vec::new(),
+        })
     }
 }
 
@@ -71,25 +93,28 @@ impl Command for Randomise {
     const NAME: &'static str = "counter:randomise";
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, DomainEvent)]
+#[domain_event(prefix = "counter")]
+enum CounterEvent {
+    Randomised { amount: i64 },
+}
+
 #[wee_events::loader(requires(CounterStore))]
 async fn load<R: CounterStore>(store: &R, id: &AggregateId) -> wee_events::Result<Entity<Counter>> {
     store.load(id).await
 }
 
-#[wee_events::handler(command = Randomise, requires(Randomizer))]
-async fn randomise<R: Randomizer>(
+#[wee_events::handler(command = Randomise, requires(wee_events::HasPublisher, Randomizer))]
+async fn randomise<R: wee_events::HasPublisher + Randomizer>(
     env: &R,
     entity: &Entity<Counter>,
     command: Randomise,
-) -> wee_events::Result<Entity<Counter>> {
+) -> wee_events::Result<()> {
     let amount = env.amount(command.min, command.max).await?;
-    Ok(Entity {
-        aggregate_id: entity.aggregate_id.clone(),
-        revision: entity.revision.clone(),
-        state: Counter {
-            value: entity.state.value + amount,
-        },
-    })
+    env.publisher()
+        .publish(entity, vec![CounterEvent::Randomised { amount }])
+        .await?;
+    Ok(())
 }
 
 wee_events::service! {

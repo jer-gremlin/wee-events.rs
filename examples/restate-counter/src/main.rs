@@ -1,5 +1,4 @@
 mod commands;
-mod counter_publisher;
 mod events;
 mod randomiser;
 mod services;
