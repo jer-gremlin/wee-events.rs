@@ -7,6 +7,7 @@ mod error;
 mod event;
 mod id;
 mod memory_store;
+mod publisher;
 mod renderer;
 mod service;
 mod service_builder;
@@ -29,6 +30,7 @@ pub use id::{
     AggregateId, AggregateIdParseError, AggregateType, CommandName, CorrelationId, EventId,
     EventType, Revision,
 };
+pub use publisher::{HasPublisher, Publisher};
 pub use renderer::{ReduceFn, Renderer};
 #[doc(hidden)]
 pub use service::__private;
