@@ -1,0 +1,5 @@
+error: expected `all`, `predicate(...)`, or `[Cmd, ...]` after `on`
+  --> tests/ui/service_macro_rejects_any_effect_filter.rs:43:25
+   |
+43 |             AuditLog on any,
+   |                         ^^^

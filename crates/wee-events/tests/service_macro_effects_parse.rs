@@ -77,7 +77,7 @@ wee_events::service! {
         handlers: [inc, adj],
         effects: [
             SendWelcomeEmail on [Inc],
-            UpdateAnalytics on any,
+            UpdateAnalytics on all,
             AuditLog on predicate(|n| n.command.name.as_str() == "counter:increment"),
         ],
     }
