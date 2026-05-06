@@ -7,9 +7,9 @@ pub trait AuditLog {
     ) -> Result<(), HandlerError>;
 }
 
-pub struct AuditLogImpl;
+pub struct ConsoleAuditLog;
 
-impl AuditLog for AuditLogImpl {
+impl AuditLog for ConsoleAuditLog {
     async fn run(
         &self,
         _ctx: WorkflowContext<'_>,

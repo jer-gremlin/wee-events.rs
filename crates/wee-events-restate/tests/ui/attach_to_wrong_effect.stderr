@@ -1,0 +1,39 @@
+error[E0277]: the trait bound `MetricsWorkflow: AuditLog` is not satisfied
+  --> tests/ui/attach_to_wrong_effect.rs:73:22
+   |
+73 |         .with_effect(MetricsWorkflow)
+   |          ----------- ^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |          |
+   |          required by a bound introduced by this call
+   |
+help: the trait `AuditLog` is not implemented for `MetricsWorkflow`
+  --> tests/ui/attach_to_wrong_effect.rs:34:1
+   |
+34 | struct MetricsWorkflow;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+help: the trait `AuditLog` is implemented for `ConsoleAuditLog`
+  --> tests/ui/attach_to_wrong_effect.rs:24:1
+   |
+24 | impl AuditLog for ConsoleAuditLog {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required for `Registration<Env, Env, Needs<CounterServiceAuditLogEffect, wee_events_restate::Ready>>` to implement `WithEffect<MetricsWorkflow, CounterServiceAuditLogEffect>`
+  --> tests/ui/attach_to_wrong_effect.rs:57:1
+   |
+57 | / wee_events::service! {
+58 | |     CounterService("counter") for Counter {
+59 | |         loader: load,
+60 | |         handlers: [inc],
+...  |
+65 | | }
+   | |_^
+note: required by a bound in `Registration::<__Store, __Services, __RemainingEffects>::with_effect`
+  --> tests/ui/attach_to_wrong_effect.rs:57:1
+   |
+57 | / wee_events::service! {
+58 | |     CounterService("counter") for Counter {
+59 | |         loader: load,
+60 | |         handlers: [inc],
+...  |
+65 | | }
+   | |_^ required by this bound in `Registration::<__Store, __Services, __RemainingEffects>::with_effect`
+   = note: this error originates in the macro `wee_events::service` (in Nightly builds, run with -Z macro-backtrace for more info)

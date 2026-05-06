@@ -1,0 +1,36 @@
+error[E0599]: the method `attach_to` exists for struct `Registration<Env, Env, wee_events_restate::Ready>`, but its trait bounds were not satisfied
+  --> tests/ui/attach_to_missing_store.rs:52:10
+   |
+39 | / wee_events::service! {
+40 | |     CounterService("counter") for Counter {
+41 | |         loader: load,
+42 | |         handlers: [inc],
+43 | |     }
+44 | | }
+   | |_- method `attach_to` not found for this struct because it doesn't satisfy `_: CounterServiceBinder`
+...
+47 |   struct Env;
+   |   ---------- doesn't satisfy `Env: CounterStore`
+...
+50 |       let _endpoint = wee_events_restate::create(CounterService)
+   |  _____________________-
+51 | |         .with_env(Env)
+52 | |         .attach_to(Endpoint::builder())
+   | |         -^^^^^^^^^ method cannot be called on `Registration<Env, Env, wee_events_restate::Ready>` due to unsatisfied trait bounds
+   | |_________|
+   |
+   |
+note: trait bound `Env: CounterStore` was not satisfied
+  --> tests/ui/attach_to_missing_store.rs:22:31
+   |
+22 | #[wee_events::loader(requires(CounterStore))]
+   | ------------------------------^^^^^^^^^^^^---
+   |                               |
+   |                               unsatisfied trait bound introduced here
+23 | async fn load<R: CounterStore>(
+   |          ----
+note: the trait `CounterStore` must be implemented
+  --> tests/ui/attach_to_missing_store.rs:6:1
+   |
+ 6 | trait CounterStore: Send + Sync {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

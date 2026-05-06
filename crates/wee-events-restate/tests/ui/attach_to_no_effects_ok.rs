@@ -1,0 +1,51 @@
+#![allow(unexpected_cfgs)]
+
+use restate_sdk::prelude::*;
+use wee_events::{AggregateId, Command, Entity, Revision};
+
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+struct Counter;
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct Inc;
+impl Command for Inc {
+    const NAME: &'static str = "counter:inc";
+}
+
+#[wee_events::loader]
+async fn load<R: Send + Sync + 'static>(
+    _env: &R,
+    id: &AggregateId,
+) -> wee_events::Result<Entity<Counter>> {
+    Ok(Entity {
+        aggregate_id: id.clone(),
+        revision: Revision::zero(),
+        state: Counter,
+    })
+}
+
+#[wee_events::handler(command = Inc)]
+async fn inc<R: Send + Sync + 'static>(
+    _env: &R,
+    entity: &Entity<Counter>,
+    _cmd: Inc,
+) -> wee_events::Result<Entity<Counter>> {
+    Ok(entity.clone())
+}
+
+wee_events::service! {
+    CounterService("counter") for Counter {
+        loader: load,
+        handlers: [inc],
+    }
+}
+
+#[derive(Clone)]
+struct Env;
+
+fn main() {
+    let _endpoint = wee_events_restate::create(CounterService)
+        .with_env(Env)
+        .attach_to(Endpoint::builder())
+        .build();
+}

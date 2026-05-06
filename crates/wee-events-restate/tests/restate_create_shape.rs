@@ -156,9 +156,9 @@ wee_events::service! {
 
 #[test]
 fn create_binds_services_inside_restate_run_boundary() {
-    let binding = wee_events_restate::create(CounterService)
+    let _endpoint = wee_events_restate::create(CounterService)
         .with_store(FixedStore)
         .with_env(FixedRandomizer)
-        .serve();
-    let _endpoint = Endpoint::builder().bind(binding).build();
+        .attach_to(Endpoint::builder())
+        .build();
 }
