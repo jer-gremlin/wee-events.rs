@@ -1,5 +1,6 @@
 use crate::entity::Entity;
 use crate::event::{ChangeSet, DomainEvent};
+use crate::service::ServiceError;
 use crate::store::{EventStore, PublishOptions};
 
 /// Publishes typed domain events for an aggregate entity.
@@ -21,14 +22,15 @@ where
         &self,
         entity: &Entity<S>,
         events: Vec<E>,
-    ) -> crate::Result<ChangeSet>
+    ) -> Result<ChangeSet, ServiceError<Store::Error>>
     where
         E: DomainEvent,
     {
         let raw_events = events
             .iter()
             .map(crate::to_raw_event)
-            .collect::<crate::Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ServiceError::Codec)?;
 
         self.store
             .publish(
@@ -40,6 +42,7 @@ where
                 raw_events,
             )
             .await
+            .map_err(ServiceError::Store)
     }
 }
 

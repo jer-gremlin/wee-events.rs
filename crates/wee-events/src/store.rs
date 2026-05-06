@@ -23,32 +23,40 @@ pub struct RawEvent {
 /// Domain-agnostic event store. A single store instance serves all aggregates —
 /// load and publish take `AggregateId` as a parameter.
 ///
-/// Implementors provide the persistence mechanism (in-memory, SQLite, etc.).
+/// Implementors provide the persistence mechanism (in-memory, SQLite, etc.)
+/// and choose their own error type via `type Error`. The error type must
+/// be convertible from `crate::Error` so that structural failures
+/// (revision conflicts, encoding mismatches, retry exhaustion) flow through
+/// unchanged.
 ///
 /// This trait is intended for static dispatch. Methods return `Send` futures so
 /// generated durable adapters can hold store references across async boundaries.
 pub trait EventStore: Send + Sync {
+    type Error: From<crate::Error> + std::error::Error + Send + Sync + 'static;
+
     fn load(
         &self,
         id: &AggregateId,
-    ) -> impl Future<Output = Result<Aggregate, crate::Error>> + Send;
+    ) -> impl Future<Output = Result<Aggregate, Self::Error>> + Send;
 
     fn publish(
         &self,
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> impl Future<Output = Result<ChangeSet, crate::Error>> + Send;
+    ) -> impl Future<Output = Result<ChangeSet, Self::Error>> + Send;
 }
 
 impl<T> EventStore for Arc<T>
 where
     T: EventStore + ?Sized,
 {
+    type Error = T::Error;
+
     fn load(
         &self,
         id: &AggregateId,
-    ) -> impl Future<Output = Result<Aggregate, crate::Error>> + Send {
+    ) -> impl Future<Output = Result<Aggregate, Self::Error>> + Send {
         (**self).load(id)
     }
 
@@ -57,7 +65,7 @@ where
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> impl Future<Output = Result<ChangeSet, crate::Error>> + Send {
+    ) -> impl Future<Output = Result<ChangeSet, Self::Error>> + Send {
         (**self).publish(aggregate_id, options, events)
     }
 }

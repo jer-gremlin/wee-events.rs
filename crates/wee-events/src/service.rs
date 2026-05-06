@@ -64,7 +64,9 @@ pub enum ServiceError<E: std::error::Error + Send + Sync + 'static> {
 /// EventStore and render through a Renderer.
 #[allow(async_fn_in_trait)]
 pub trait EntityLoader<S>: Send + Sync {
-    async fn load(&self, id: &AggregateId) -> crate::Result<Entity<S>>;
+    type Error;
+
+    async fn load(&self, id: &AggregateId) -> Result<Entity<S>, Self::Error>;
 }
 
 /// Executes a named command against a target aggregate, returning the
@@ -75,18 +77,19 @@ pub trait EntityLoader<S>: Send + Sync {
 /// deserialization into concrete command enums) happens inside
 /// implementations.
 ///
-/// Returns `crate::Result` so implementations can propagate both
-/// infrastructure errors (store failures, serialization) and domain
-/// rejections (`Error::Rejection`). Callers distinguish the two by
-/// pattern-matching on the `Error` enum.
+/// Implementations choose their own error type via `Self::Error`. Service-level
+/// implementations typically use `ServiceError<StoreError>` so callers can
+/// distinguish domain rejections from infrastructure and codec failures.
 #[allow(async_fn_in_trait)]
 pub trait CommandExecutor<S>: Send + Sync {
+    type Error;
+
     async fn execute(
         &self,
         name: &CommandName,
         target: &AggregateId,
         command: serde_json::Value,
-    ) -> crate::Result<Entity<S>>;
+    ) -> Result<Entity<S>, Self::Error>;
 }
 
 /// A service combines entity loading with command execution.
@@ -121,11 +124,13 @@ pub mod __private {
     /// by the `service!` macro with the specific `Idx` type computed from the
     /// handler registration order.
     pub trait DispatchCommand<C>: ServiceState + Send + Sync {
+        type Error;
+
         fn dispatch_command(
             &self,
             id: &AggregateId,
             cmd: C,
-        ) -> impl Future<Output = crate::Result<Entity<Self::State>>> + Send;
+        ) -> impl Future<Output = Result<Entity<Self::State>, Self::Error>> + Send;
     }
 }
 
@@ -149,17 +154,41 @@ pub trait Handles<C>: __private::DispatchCommand<C> {}
 /// The trait is transport-agnostic: no `Serialize`, `Deserialize`, or
 /// transport-specific bounds appear here. Serialization is an adapter concern
 /// handled by generated macro code.
+///
+/// # Error type asymmetry
+///
+/// `load` returns `Self::Error` while `execute<C>` returns
+/// `<Self as DispatchCommand<C>>::Error`. The two are independent because
+/// command execution can fail with domain rejections (a service-layer
+/// concept) that do not apply to plain entity loads. Callers that need a
+/// uniform error surface across both should pattern-match on each impl's
+/// concrete error type.
+///
+/// # Implementation note
+///
+/// Two `TypedService` implementations exist in this crate today:
+///
+/// - `DomainService` uses `ServiceError<Store::Error>` for `execute`,
+///   surfacing rejections and codec failures distinctly.
+/// - `BuiltService` (from the `service!` macro) emits
+///   `type Error = wee_events::Error` for both `load` and `execute`. This
+///   contract cannot surface domain rejections — a known limitation while
+///   `service_builder.rs` is migrated to thread `ServiceError`.
 pub trait TypedService<S>: __private::ServiceState<State = S> + Send + Sync {
+    type Error;
+
     fn load(
         &self,
         id: &AggregateId,
-    ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send;
+    ) -> impl core::future::Future<Output = Result<Entity<S>, Self::Error>> + Send;
 
     fn execute<C>(
         &self,
         id: &AggregateId,
         cmd: C,
-    ) -> impl core::future::Future<Output = crate::Result<Entity<S>>> + Send
+    ) -> impl core::future::Future<
+        Output = Result<Entity<S>, <Self as __private::DispatchCommand<C>>::Error>,
+    > + Send
     where
         C: crate::Command + Send + 'static,
         Self: Handles<C>,
