@@ -2,6 +2,7 @@ mod bundle;
 mod client;
 mod correlation;
 mod effects;
+mod error;
 mod executor;
 #[doc(hidden)]
 pub mod generated;
@@ -15,6 +16,7 @@ pub use bundle::{service_bundle, ServiceBundle};
 pub use client::RestateClient;
 pub use correlation::correlation_id;
 pub use effects::{EffectRouter, EffectTrigger, SideEffectFilter};
+pub use error::Error;
 pub use executor::CommandHandler;
 pub use loader::LoadHandler;
 pub use names::{executor_name, loader_name, runner_name};
@@ -111,17 +113,10 @@ pub mod __private {
     pub use serde_json;
 
     pub fn to_handler_error(e: wee_events::Error) -> restate_sdk::errors::HandlerError {
-        match e {
-            wee_events::Error::Rejection(r) => {
-                let payload = serde_json::json!({
-                    "code": r.code,
-                    "message": r.message,
-                    "context": r.context,
-                });
-                restate_sdk::errors::TerminalError::new(payload.to_string()).into()
-            }
-            e => e.into(),
-        }
+        // `wee_events::Error` no longer carries domain rejections after the
+        // error-type restructure — only structural store failures. Surface
+        // those as terminal errors so Restate doesn't retry them.
+        restate_sdk::errors::TerminalError::new(e.to_string()).into()
     }
 
     pub fn to_entity_response<S: ::serde::Serialize>(

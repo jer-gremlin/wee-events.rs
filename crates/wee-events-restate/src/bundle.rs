@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::effects::{EffectRouter, EffectTrigger};
+use crate::error::Error;
 use crate::executor::CommandHandler;
 use crate::loader::LoadHandler;
 use crate::service::ServiceAdapter;
@@ -36,6 +37,8 @@ pub fn service_bundle<S, T>(
 where
     S: Default + serde::Serialize + Send + Sync + 'static,
     T: wee_events::EntityLoader<S> + wee_events::CommandExecutor<S> + 'static,
+    <T as wee_events::EntityLoader<S>>::Error: Into<Error>,
+    <T as wee_events::CommandExecutor<S>>::Error: Into<Error>,
 {
     let name = name.into();
     let service = Arc::new(ServiceAdapter::<S, T>::new(service));
