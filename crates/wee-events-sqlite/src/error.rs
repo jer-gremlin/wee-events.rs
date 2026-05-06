@@ -19,6 +19,15 @@ pub enum Error {
     WeeEvents(#[from] wee_events::Error),
 }
 
+impl wee_events::EventStoreErrorExt for Error {
+    fn as_wee_events(&self) -> Option<&wee_events::Error> {
+        match self {
+            Error::WeeEvents(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Error;

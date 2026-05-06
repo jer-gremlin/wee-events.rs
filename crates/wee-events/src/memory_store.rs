@@ -23,6 +23,15 @@ pub enum MemoryStoreError {
     Serialization(#[from] serde_json::Error),
 }
 
+impl crate::EventStoreErrorExt for MemoryStoreError {
+    fn as_wee_events(&self) -> Option<&crate::Error> {
+        match self {
+            MemoryStoreError::WeeEvents(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 /// In-memory event store for testing. Thread-safe via `Mutex`.
 ///
 /// Uses a monotonic ULID generator — guarantees strictly increasing
@@ -144,10 +153,12 @@ impl EventStore for MemoryStore {
                 .map(|e| e.revision.clone())
                 .unwrap_or_else(Revision::zero);
             if *expected != actual {
-                return Err(MemoryStoreError::WeeEvents(crate::Error::RevisionConflict {
-                    expected: expected.clone(),
-                    actual,
-                }));
+                return Err(MemoryStoreError::WeeEvents(
+                    crate::Error::RevisionConflict {
+                        expected: expected.clone(),
+                        actual,
+                    },
+                ));
             }
         }
 

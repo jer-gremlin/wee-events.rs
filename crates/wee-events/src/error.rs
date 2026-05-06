@@ -41,6 +41,25 @@ pub enum Error {
     },
 }
 
+/// Extension trait for store error types to expose structural failures
+/// uniformly across backends.
+///
+/// The conformance test suite is generic over `EventStore` and therefore sees
+/// `Self::Error` rather than the structural `crate::Error` directly. Each
+/// store implementation provides this view so portable assertions like
+/// "this failure is a revision conflict" can be written without naming the
+/// concrete store error type.
+pub trait EventStoreErrorExt {
+    /// Returns the underlying structural error if this error wraps one.
+    fn as_wee_events(&self) -> Option<&Error>;
+}
+
+impl EventStoreErrorExt for Error {
+    fn as_wee_events(&self) -> Option<&Error> {
+        Some(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{RetryDiagnostics, Revision};

@@ -32,12 +32,15 @@ pub struct RawEvent {
 /// This trait is intended for static dispatch. Methods return `Send` futures so
 /// generated durable adapters can hold store references across async boundaries.
 pub trait EventStore: Send + Sync {
-    type Error: From<crate::Error> + std::error::Error + Send + Sync + 'static;
+    type Error: From<crate::Error>
+        + crate::EventStoreErrorExt
+        + std::error::Error
+        + Send
+        + Sync
+        + 'static;
 
-    fn load(
-        &self,
-        id: &AggregateId,
-    ) -> impl Future<Output = Result<Aggregate, Self::Error>> + Send;
+    fn load(&self, id: &AggregateId)
+        -> impl Future<Output = Result<Aggregate, Self::Error>> + Send;
 
     fn publish(
         &self,
