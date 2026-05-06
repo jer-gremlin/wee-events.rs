@@ -16,12 +16,21 @@ pub struct EventData {
     pub data: Vec<u8>,
 }
 
+/// Error returned by [`EventData::deserialize_json`].
+#[derive(Debug, thiserror::Error)]
+pub enum DeserializeJsonError {
+    #[error("encoding mismatch: expected {expected}, actual {actual}")]
+    EncodingMismatch { expected: String, actual: String },
+    #[error(transparent)]
+    Decode(#[from] serde_json::Error),
+}
+
 impl EventData {
     /// The encoding identifier for JSON payloads.
     pub const JSON_ENCODING: &'static str = "application/json";
 
     /// Creates an `EventData` from a JSON-serializable value.
-    pub fn json<T: Serialize>(value: &T) -> Result<Self, crate::Error> {
+    pub fn json<T: Serialize>(value: &T) -> Result<Self, serde_json::Error> {
         let bytes = serde_json::to_vec(value)?;
         Ok(Self {
             encoding: Self::JSON_ENCODING.to_string(),
@@ -43,15 +52,17 @@ impl EventData {
     }
 
     /// Deserializes the payload as JSON into the target type.
-    /// Returns an error if the encoding is not JSON or deserialization fails.
-    pub fn deserialize_json<T: for<'de> Deserialize<'de>>(&self) -> Result<T, crate::Error> {
+    ///
+    /// Returns `DeserializeJsonError::EncodingMismatch` if the payload is not
+    /// JSON-encoded, or `DeserializeJsonError::Decode` if JSON parsing fails.
+    pub fn deserialize_json<T: for<'de> Deserialize<'de>>(&self) -> Result<T, DeserializeJsonError> {
         if !self.is_json() {
-            return Err(crate::Error::EncodingMismatch {
+            return Err(DeserializeJsonError::EncodingMismatch {
                 expected: Self::JSON_ENCODING.to_string(),
                 actual: self.encoding.clone(),
             });
         }
-        serde_json::from_slice(&self.data).map_err(Into::into)
+        serde_json::from_slice(&self.data).map_err(DeserializeJsonError::Decode)
     }
 }
 
