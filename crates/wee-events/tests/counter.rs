@@ -3,7 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 use wee_events::{
-    memory::MemoryStore, AggregateId, Command, DomainEvent, Entity, EventData, EventStore,
+    memory::{MemoryStore, MemoryStoreError},
+    AggregateId, Command, DomainEvent, Entity, EventData, EventStore, EventStoreErrorExt,
     EventType, PublishOptions, Renderer,
 };
 
@@ -97,7 +98,7 @@ async fn handle_command(
     aggregate_id: &AggregateId,
     entity: &Entity<CounterState>,
     command: CounterCommand,
-) -> Result<(), wee_events::Error> {
+) -> Result<(), MemoryStoreError> {
     let events: Vec<CounterEvent> = match command {
         CounterCommand::Increment { amount } => {
             vec![CounterEvent::Incremented { amount }]
@@ -135,9 +136,9 @@ async fn load_entity(
     store: &MemoryStore,
     renderer: &Renderer<CounterState>,
     id: &AggregateId,
-) -> Result<Entity<CounterState>, wee_events::Error> {
+) -> Result<Entity<CounterState>, MemoryStoreError> {
     let aggregate = store.load(id).await?;
-    renderer.render(&aggregate)
+    renderer.render(&aggregate).map_err(MemoryStoreError::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -290,9 +291,10 @@ async fn optimistic_concurrency_rejects_stale_revision() {
     .await;
 
     assert!(result.is_err());
-    match result.unwrap_err() {
-        wee_events::Error::RevisionConflict { .. } => {}
-        other => panic!("expected RevisionConflict, got: {other}"),
+    let err = result.unwrap_err();
+    match err.as_wee_events() {
+        Some(wee_events::Error::RevisionConflict { .. }) => {}
+        _ => panic!("expected RevisionConflict, got: {err}"),
     }
 }
 

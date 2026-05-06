@@ -36,7 +36,9 @@ struct TempStore<T> {
 }
 
 impl<T: EventStoreTrait> EventStoreTrait for TempStore<T> {
-    async fn load(&self, id: &AggregateId) -> Result<Aggregate, wee_events::Error> {
+    type Error = T::Error;
+
+    async fn load(&self, id: &AggregateId) -> Result<Aggregate, Self::Error> {
         self.store.load(id).await
     }
 
@@ -45,7 +47,7 @@ impl<T: EventStoreTrait> EventStoreTrait for TempStore<T> {
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> Result<ChangeSet, wee_events::Error> {
+    ) -> Result<ChangeSet, Self::Error> {
         self.store.publish(aggregate_id, options, events).await
     }
 }

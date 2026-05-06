@@ -502,6 +502,10 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         .map(|sp| {
             quote! {
                 + wee_events::Handles<<#sp as wee_events::HandlerSpec>::Command>
+                + wee_events::__private::DispatchCommand<
+                    <#sp as wee_events::HandlerSpec>::Command,
+                    Error = wee_events::Error,
+                >
             }
         })
         .collect();
@@ -538,8 +542,9 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
             ///
             /// The factory's return type must satisfy `#env_trait_name` —
             /// the compiler verifies this automatically.
+            #[allow(clippy::implied_bounds_in_impls)]
             #vis fn portable<__R, __F, __Fut>(factory: __F)
-                -> impl wee_events::TypedService<#state_type>
+                -> impl wee_events::TypedService<#state_type, Error = wee_events::Error>
                        #(#handles_bounds)*
             where
                 __R: #env_trait_name + 'static,

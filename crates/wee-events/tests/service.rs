@@ -1,10 +1,13 @@
+use std::convert::Infallible;
 use std::future::Future;
 
 use serde_json::json;
 use wee_events::{
     AggregateId, Command, CommandExecutor, CommandName, Entity, EntityLoader, Handles, Rejection,
-    Revision, Service, TypedService,
+    Revision, Service, ServiceError, TypedService,
 };
+
+type TestError = ServiceError<Infallible>;
 
 #[test]
 fn rejection_displays_code_and_message() {
@@ -31,10 +34,10 @@ fn rejection_default_context_is_empty_object() {
 }
 
 #[test]
-fn rejection_converts_to_error() {
+fn rejection_converts_to_service_error() {
     let r = Rejection::new("CODE", "msg");
-    let err: wee_events::Error = r.into();
-    assert!(matches!(err, wee_events::Error::Rejection(_)));
+    let err: TestError = r.into();
+    assert!(matches!(err, ServiceError::Rejection(_)));
 }
 
 #[test]
@@ -66,7 +69,9 @@ struct Counter {
 struct CounterService;
 
 impl EntityLoader<Counter> for CounterService {
-    async fn load(&self, id: &AggregateId) -> wee_events::Result<Entity<Counter>> {
+    type Error = TestError;
+
+    async fn load(&self, id: &AggregateId) -> Result<Entity<Counter>, Self::Error> {
         Ok(Entity {
             aggregate_id: id.clone(),
             revision: Revision::zero(),
@@ -76,12 +81,14 @@ impl EntityLoader<Counter> for CounterService {
 }
 
 impl CommandExecutor<Counter> for CounterService {
+    type Error = TestError;
+
     async fn execute(
         &self,
         name: &CommandName,
         target: &AggregateId,
         command: serde_json::Value,
-    ) -> wee_events::Result<Entity<Counter>> {
+    ) -> Result<Entity<Counter>, Self::Error> {
         let amount = command["amount"].as_i64().unwrap_or(1);
         match name.as_str() {
             "increment" => Ok(Entity {
@@ -118,14 +125,19 @@ async fn command_executor_rejects_unknown() {
     let name = CommandName::from("explode");
     let err = svc.execute(&name, &id, json!({})).await.unwrap_err();
     match err {
-        wee_events::Error::Rejection(r) => assert_eq!(r.code, "UNKNOWN_COMMAND"),
+        ServiceError::Rejection(r) => assert_eq!(r.code, "UNKNOWN_COMMAND"),
         other => panic!("expected Rejection, got: {other}"),
     }
 }
 
 /// Verify blanket `Service` impl works — a function accepting `impl Service<Counter>`
 /// can call both `load` and `execute`.
-async fn use_service(svc: &impl Service<Counter>) -> Entity<Counter> {
+async fn use_service<S>(svc: &S) -> Entity<Counter>
+where
+    S: Service<Counter>,
+    <S as EntityLoader<Counter>>::Error: std::fmt::Debug,
+    <S as CommandExecutor<Counter>>::Error: std::fmt::Debug,
+{
     let id: AggregateId = "counter:svc-1".parse().unwrap();
     let _ = svc.load(&id).await.unwrap();
     let name = CommandName::from("increment");
@@ -161,11 +173,13 @@ impl wee_events::__private::ServiceState for TypedCounterService {
 
 // Implement DispatchCommand<Increment> — required by Handles<Increment>
 impl wee_events::__private::DispatchCommand<Increment> for TypedCounterService {
+    type Error = TestError;
+
     fn dispatch_command(
         &self,
         id: &AggregateId,
         cmd: Increment,
-    ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send {
+    ) -> impl Future<Output = Result<Entity<Counter>, Self::Error>> + Send {
         let id = id.clone();
         async move {
             Ok(Entity {
@@ -181,10 +195,12 @@ impl wee_events::__private::DispatchCommand<Increment> for TypedCounterService {
 impl Handles<Increment> for TypedCounterService {}
 
 impl TypedService<Counter> for TypedCounterService {
+    type Error = TestError;
+
     fn load(
         &self,
         id: &AggregateId,
-    ) -> impl Future<Output = wee_events::Result<Entity<Counter>>> + Send {
+    ) -> impl Future<Output = Result<Entity<Counter>, Self::Error>> + Send {
         let id = id.clone();
         async move {
             Ok(Entity {
