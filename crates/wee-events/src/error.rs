@@ -39,18 +39,6 @@ pub enum Error {
         attempts: usize,
         diagnostics: RetryDiagnostics,
     },
-
-    #[error("serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
-
-    /// Store implementation errors (backend-specific failures).
-    /// Wraps the original error to preserve the error chain for debugging.
-    #[error(transparent)]
-    Store(Box<dyn std::error::Error + Send + Sync>),
-
-    /// Domain-level rejection from a command handler.
-    #[error(transparent)]
-    Rejection(#[from] crate::service::Rejection),
 }
 
 #[cfg(test)]
