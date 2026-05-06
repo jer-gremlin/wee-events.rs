@@ -20,7 +20,7 @@ fn reduce_incremented(
     state: &mut Counter,
     _event_type: &EventType,
     data: &EventData,
-) -> wee_events::Result<()> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     let CounterEvent::Incremented { amount } = data.deserialize_json()? else {
         return Ok(());
     };
@@ -32,7 +32,7 @@ fn reduce_reset(
     state: &mut Counter,
     _event_type: &EventType,
     _data: &EventData,
-) -> wee_events::Result<()> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     state.value = 0;
     Ok(())
 }
@@ -41,7 +41,7 @@ fn reduce_randomised(
     state: &mut Counter,
     _event_type: &EventType,
     data: &EventData,
-) -> wee_events::Result<()> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     let CounterEvent::Randomised { amount } = data.deserialize_json()? else {
         return Ok(());
     };

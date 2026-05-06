@@ -69,6 +69,36 @@ where
     }
 }
 
+/// `HandlerEnv` delegates `EventStore` to its inner store. This lets
+/// portable in-process services use a single env type that is BOTH the
+/// store (for the loader) and a publisher (for handlers), so loader and
+/// handler errors unify on `<Store as EventStore>::Error`.
+impl<Store, Services> wee_events::EventStore for HandlerEnv<Store, Services>
+where
+    Store: wee_events::EventStore,
+    Services: Send + Sync,
+{
+    type Error = Store::Error;
+
+    fn load(
+        &self,
+        id: &wee_events::AggregateId,
+    ) -> impl ::std::future::Future<Output = ::std::result::Result<wee_events::Aggregate, Self::Error>>
+           + Send {
+        self.store.load(id)
+    }
+
+    fn publish(
+        &self,
+        aggregate_id: &wee_events::AggregateId,
+        options: wee_events::PublishOptions,
+        events: ::std::vec::Vec<wee_events::RawEvent>,
+    ) -> impl ::std::future::Future<Output = ::std::result::Result<wee_events::ChangeSet, Self::Error>>
+           + Send {
+        self.store.publish(aggregate_id, options, events)
+    }
+}
+
 pub fn create<Service>(service: Service) -> RestateServiceBuilder<Service> {
     RestateServiceBuilder { service }
 }
@@ -112,11 +142,53 @@ pub mod __private {
     pub use restate_sdk::{context, errors, object, serde};
     pub use serde_json;
 
-    pub fn to_handler_error(e: wee_events::Error) -> restate_sdk::errors::HandlerError {
-        // `wee_events::Error` no longer carries domain rejections after the
-        // error-type restructure — only structural store failures. Surface
-        // those as terminal errors so Restate doesn't retry them.
-        restate_sdk::errors::TerminalError::new(e.to_string()).into()
+    /// Implemented by error types that the macro-generated Restate path may
+    /// produce. Centralising the conversion here lets a single helper
+    /// (`to_handler_error`) accept any of the supported shapes — structural
+    /// `wee_events::Error` (from older handlers/loaders), structural
+    /// rejections via `ServiceError<E>::Rejection`, and store-specific errors
+    /// behind `ServiceError<E>::Store`.
+    pub trait IntoHandlerError {
+        fn into_handler_error(self) -> restate_sdk::errors::HandlerError;
+    }
+
+    impl IntoHandlerError for wee_events::Error {
+        fn into_handler_error(self) -> restate_sdk::errors::HandlerError {
+            // `wee_events::Error` carries only structural store-contract
+            // failures after the error-type restructure — surface them as
+            // terminal so Restate doesn't retry.
+            restate_sdk::errors::TerminalError::new(self.to_string()).into()
+        }
+    }
+
+    impl<E> IntoHandlerError for wee_events::ServiceError<E>
+    where
+        E: ::std::error::Error + ::std::marker::Send + ::std::marker::Sync + 'static,
+    {
+        fn into_handler_error(self) -> restate_sdk::errors::HandlerError {
+            match self {
+                wee_events::ServiceError::Rejection(r) => {
+                    let payload = ::serde_json::json!({
+                        "code": r.code,
+                        "message": r.message,
+                        "context": r.context,
+                    });
+                    restate_sdk::errors::TerminalError::new(payload.to_string()).into()
+                }
+                wee_events::ServiceError::Codec(err) => {
+                    restate_sdk::errors::TerminalError::new(err.to_string()).into()
+                }
+                wee_events::ServiceError::Store(err) => {
+                    restate_sdk::errors::TerminalError::new(err.to_string()).into()
+                }
+            }
+        }
+    }
+
+    /// Lift a service-layer error into a Restate handler error. See
+    /// [`IntoHandlerError`].
+    pub fn to_handler_error<E: IntoHandlerError>(e: E) -> restate_sdk::errors::HandlerError {
+        e.into_handler_error()
     }
 
     pub fn to_entity_response<S: ::serde::Serialize>(

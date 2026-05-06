@@ -531,17 +531,30 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     let namespace_struct = quote! {
         /// Generated service namespace.
         ///
-        /// Call `portable(factory)` to produce a portable in-process service
-        /// with fully static dispatch. All type parameters are inferred from
-        /// the factory — no type erasure, no `Box<dyn Any>`.
+        /// Use [`portable`](#method.portable) for an in-process service with
+        /// fully static dispatch — handy for tests. Services whose loader and
+        /// handler errors diverge (for example, those returning
+        /// `ServiceError<Store::Error>` against an env-typed split) skip
+        /// `portable` and either go through the `wee_events_restate` adapter
+        /// or build a `BuiltService` manually.
         #vis struct #name;
 
         impl #name {
-            /// Build a portable (in-process) service using the given factory
-            /// to construct the environment per-operation.
+            /// Build a portable (in-process) service using the given factory.
             ///
-            /// The factory's return type must satisfy `#env_trait_name` —
-            /// the compiler verifies this automatically.
+            /// The macro pins both the loader and handler error to
+            /// `wee_events::Error` here — services whose handlers return a
+            /// richer service error must construct a `BuiltService` directly
+            /// via `ServiceBuilder` rather than calling `portable`.
+            ///
+            /// Emission of this helper is gated on a private feature of
+            /// the consuming crate (`__wee_events_portable`) so that
+            /// downstream crates which don't need it (e.g. the
+            /// `restate-counter` example) don't have to satisfy the
+            /// `crate::Error`-pinned bridge constraints. Crates that DO need
+            /// `portable()` (the wee-events tests) enable the feature in
+            /// their `Cargo.toml`.
+            #[cfg(feature = "__wee_events_portable")]
             #[allow(clippy::implied_bounds_in_impls)]
             #vis fn portable<__R, __F, __Fut>(factory: __F)
                 -> impl wee_events::TypedService<#state_type, Error = wee_events::Error>
@@ -556,7 +569,13 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     + ::std::marker::Send
                     + 'static,
             {
-                wee_events::ServiceBuilder::<#state_type>::new()
+                wee_events::ServiceBuilder::<
+                    #state_type,
+                    (),
+                    wee_events::EmptyHandlers,
+                    wee_events::Error,
+                    wee_events::Error,
+                >::new()
                     .with_loader(#loader_fn_path::<__R>)
                     #(#with_handler_calls)*
                     .build(factory)
@@ -574,25 +593,35 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         .map(|(i, sp)| {
             let idx = compute_idx(i, total);
             quote! {
-                impl<__R, __L, __F, __H> wee_events::__private::DispatchCommand<
+                impl<__R, __L, __F, __H, __EL, __EH> wee_events::__private::DispatchCommand<
                     <#sp as wee_events::HandlerSpec>::Command,
                 >
-                    for wee_events::BuiltService<__R, #state_type, __L, __F, __H>
+                    for wee_events::BuiltService<__R, #state_type, __L, __F, __H, __EL, __EH>
                 where
                     __R: #env_trait_name + 'static,
                     __L: ::std::marker::Send + ::std::marker::Sync + 'static,
                     __F: ::std::marker::Send + ::std::marker::Sync + 'static,
                     __H: ::std::marker::Send + ::std::marker::Sync + 'static,
-                    for<'a> &'a __L: wee_events::LoaderBridge<'a, __R, #state_type>,
+                    __EL: ::std::convert::From<wee_events::Error>
+                        + ::std::marker::Send
+                        + ::std::marker::Sync
+                        + 'static,
+                    __EH: ::std::convert::From<wee_events::Error>
+                        + ::std::convert::From<__EL>
+                        + ::std::marker::Send
+                        + ::std::marker::Sync
+                        + 'static,
+                    for<'a> &'a __L: wee_events::LoaderBridge<'a, __R, #state_type, __EL>,
                     for<'a> &'a __F: wee_events::FactoryBridge<'a, __R>,
                     __H: wee_events::HandleCommand<
                         <#sp as wee_events::HandlerSpec>::Command,
                         #idx,
                         __R,
                         #state_type,
+                        __EH,
                     >,
                 {
-                    type Error = wee_events::Error;
+                    type Error = __EH;
 
                     fn dispatch_command(
                         &self,
@@ -601,29 +630,35 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                     ) -> impl ::std::future::Future<
                         Output = ::std::result::Result<
                             wee_events::Entity<#state_type>,
-                            wee_events::Error,
+                            __EH,
                         >,
                     > + ::std::marker::Send {
                         let id = id.clone();
                         async move {
-                            let ctx = <&__F as wee_events::FactoryBridge<'_, __R>>::call(&self.factory).await?;
-                            let entity = <&__L as wee_events::LoaderBridge<'_, __R, #state_type>>::call(&self.loader, &ctx, &id).await?;
+                            let ctx = <&__F as wee_events::FactoryBridge<'_, __R>>::call(&self.factory)
+                                .await
+                                .map_err(<__EH as ::std::convert::From<wee_events::Error>>::from)?;
+                            let entity = <&__L as wee_events::LoaderBridge<'_, __R, #state_type, __EL>>::call(&self.loader, &ctx, &id)
+                                .await
+                                .map_err(<__EH as ::std::convert::From<__EL>>::from)?;
                             match self.handlers.handle(&ctx, &entity, cmd).await? {
                                 wee_events::HandlerOutcome::Entity(entity) => Ok(entity),
                                 wee_events::HandlerOutcome::Reload => {
-                                    <&__L as wee_events::LoaderBridge<'_, __R, #state_type>>::call(&self.loader, &ctx, &id).await
+                                    <&__L as wee_events::LoaderBridge<'_, __R, #state_type, __EL>>::call(&self.loader, &ctx, &id)
+                                        .await
+                                        .map_err(<__EH as ::std::convert::From<__EL>>::from)
                                 }
                             }
                         }
                     }
                 }
 
-                impl<__R, __L, __F, __H> wee_events::Handles<
+                impl<__R, __L, __F, __H, __EL, __EH> wee_events::Handles<
                     <#sp as wee_events::HandlerSpec>::Command,
                 >
-                    for wee_events::BuiltService<__R, #state_type, __L, __F, __H>
+                    for wee_events::BuiltService<__R, #state_type, __L, __F, __H, __EL, __EH>
                 where
-                    wee_events::BuiltService<__R, #state_type, __L, __F, __H>:
+                    wee_events::BuiltService<__R, #state_type, __L, __F, __H, __EL, __EH>:
                         wee_events::__private::DispatchCommand<
                             <#sp as wee_events::HandlerSpec>::Command,
                         >,
@@ -633,17 +668,22 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
         .collect();
 
     let typed_service_impl = quote! {
-        impl<__R, __L, __F, __H> wee_events::TypedService<#state_type>
-            for wee_events::BuiltService<__R, #state_type, __L, __F, __H>
+        impl<__R, __L, __F, __H, __EL, __EH> wee_events::TypedService<#state_type>
+            for wee_events::BuiltService<__R, #state_type, __L, __F, __H, __EL, __EH>
         where
             __R: #env_trait_name + 'static,
             __L: ::std::marker::Send + ::std::marker::Sync + 'static,
             __F: ::std::marker::Send + ::std::marker::Sync + 'static,
             __H: ::std::marker::Send + ::std::marker::Sync + 'static,
-            for<'a> &'a __L: wee_events::LoaderBridge<'a, __R, #state_type>,
+            __EL: ::std::convert::From<wee_events::Error>
+                + ::std::marker::Send
+                + ::std::marker::Sync
+                + 'static,
+            __EH: ::std::marker::Send + ::std::marker::Sync + 'static,
+            for<'a> &'a __L: wee_events::LoaderBridge<'a, __R, #state_type, __EL>,
             for<'a> &'a __F: wee_events::FactoryBridge<'a, __R>,
         {
-            type Error = wee_events::Error;
+            type Error = __EL;
 
             fn load(
                 &self,
@@ -651,13 +691,15 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
             ) -> impl ::std::future::Future<
                 Output = ::std::result::Result<
                     wee_events::Entity<#state_type>,
-                    wee_events::Error,
+                    __EL,
                 >,
             > + ::std::marker::Send {
                 let id = id.clone();
                 async move {
-                    let ctx = <&__F as wee_events::FactoryBridge<'_, __R>>::call(&self.factory).await?;
-                    <&__L as wee_events::LoaderBridge<'_, __R, #state_type>>::call(&self.loader, &ctx, &id).await
+                    let ctx = <&__F as wee_events::FactoryBridge<'_, __R>>::call(&self.factory)
+                        .await
+                        .map_err(<__EL as ::std::convert::From<wee_events::Error>>::from)?;
+                    <&__L as wee_events::LoaderBridge<'_, __R, #state_type, __EL>>::call(&self.loader, &ctx, &id).await
                 }
             }
         }

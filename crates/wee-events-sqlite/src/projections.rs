@@ -1,7 +1,16 @@
 use serde::Serialize;
-use wee_events::{AggregateType, ChangeSet, EventStore as _, Renderer};
+use wee_events::{AggregateType, ChangeSet, DeserializeJsonError, EventStore as _, Renderer};
 
 use crate::{DocumentStore, Error, SqliteEventStore};
+
+fn map_render_error(err: DeserializeJsonError) -> Error {
+    match err {
+        DeserializeJsonError::EncodingMismatch { expected, actual } => {
+            Error::WeeEvents(wee_events::Error::EncodingMismatch { expected, actual })
+        }
+        DeserializeJsonError::Decode(e) => Error::Serialization(e),
+    }
+}
 
 /// Applies a projection for a single aggregate after publish.
 pub async fn apply_projection<S: Default + Serialize>(
@@ -12,7 +21,7 @@ pub async fn apply_projection<S: Default + Serialize>(
     collection: &str,
 ) -> Result<(), Error> {
     let aggregate = event_store.load(&changeset.aggregate_id).await?;
-    let entity = renderer.render(&aggregate)?;
+    let entity = renderer.render(&aggregate).map_err(map_render_error)?;
     let document = serde_json::to_value(&entity.state)?;
 
     document_store
@@ -51,7 +60,7 @@ pub async fn rebuild_projection<S: Default + Serialize>(
             }
         }
 
-        let entity = renderer.render(&aggregate)?;
+        let entity = renderer.render(&aggregate).map_err(map_render_error)?;
         let document = serde_json::to_value(&entity.state)?;
 
         document_store

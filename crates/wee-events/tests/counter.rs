@@ -50,7 +50,7 @@ fn reduce_incremented(
     state: &mut CounterState,
     _event_type: &EventType,
     data: &EventData,
-) -> Result<(), wee_events::Error> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     let event: CounterEvent = data.deserialize_json()?;
     if let CounterEvent::Incremented { amount } = event {
         state.value += amount;
@@ -63,7 +63,7 @@ fn reduce_decremented(
     state: &mut CounterState,
     _event_type: &EventType,
     data: &EventData,
-) -> Result<(), wee_events::Error> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     let event: CounterEvent = data.deserialize_json()?;
     if let CounterEvent::Decremented { amount } = event {
         state.value -= amount;
@@ -76,7 +76,7 @@ fn reduce_reset(
     state: &mut CounterState,
     _event_type: &EventType,
     _data: &EventData,
-) -> Result<(), wee_events::Error> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     state.value = 0;
     state.event_count += 1;
     Ok(())
@@ -138,7 +138,12 @@ async fn load_entity(
     id: &AggregateId,
 ) -> Result<Entity<CounterState>, MemoryStoreError> {
     let aggregate = store.load(id).await?;
-    renderer.render(&aggregate).map_err(MemoryStoreError::from)
+    renderer.render(&aggregate).map_err(|e| match e {
+        wee_events::DeserializeJsonError::EncodingMismatch { expected, actual } => {
+            MemoryStoreError::from(wee_events::Error::EncodingMismatch { expected, actual })
+        }
+        wee_events::DeserializeJsonError::Decode(e) => MemoryStoreError::from(e),
+    })
 }
 
 // ---------------------------------------------------------------------------

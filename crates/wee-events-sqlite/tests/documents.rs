@@ -449,7 +449,7 @@ fn reduce_incremented(
     state: &mut CounterState,
     _event_type: &EventType,
     data: &EventData,
-) -> Result<(), wee_events::Error> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     #[derive(Deserialize)]
     struct Payload {
         amount: i64,
@@ -465,7 +465,7 @@ fn reduce_decremented(
     state: &mut CounterState,
     _event_type: &EventType,
     data: &EventData,
-) -> Result<(), wee_events::Error> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     #[derive(Deserialize)]
     struct Payload {
         amount: i64,

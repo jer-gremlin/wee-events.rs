@@ -9,6 +9,12 @@ readme.workspace = true
 
 [features]
 testing = ["dep:criterion", "dep:tokio", "dep:futures"]
+# Internal feature: emits the macro-generated `portable()` helper on each
+# service. Default-off so consumer crates whose handlers return richer
+# errors than `wee_events::Error` (and hence can't satisfy the helper's
+# bridge constraints) compile cleanly without extra ceremony. Enabled by
+# the wee-events test build.
+__wee_events_portable = []
 
 [dependencies]
 criterion = { version = "0.5", features = ["async_tokio"], optional = true }
@@ -22,7 +28,7 @@ wee-events-macros = { path = "../wee-events-macros" }
 
 [dev-dependencies]
 restate-sdk = "0.9"
-wee-events = { path = ".", features = ["testing"] }
+wee-events = { path = ".", features = ["testing", "__wee_events_portable"] }
 wee-events-restate = { path = "../wee-events-restate" }
 tokio = { workspace = true }
 trybuild = "1"
