@@ -7,7 +7,21 @@ use crate::aggregate::Aggregate;
 use crate::event::{ChangeSet, EventMetadata, RecordedEvent};
 use crate::id::{AggregateId, AggregateType, EventId, Revision};
 use crate::store::{EventStore, PublishOptions, RawEvent};
-use crate::Error;
+
+/// Errors produced by [`MemoryStore`].
+///
+/// The `WeeEvents` variant carries structural failures from `crate::Error`
+/// (revision conflicts, encoding mismatches, retry exhaustion), satisfying
+/// the `From<crate::Error>` bound required by the [`EventStore`] trait.
+#[derive(Debug, thiserror::Error)]
+pub enum MemoryStoreError {
+    #[error(transparent)]
+    WeeEvents(#[from] crate::Error),
+    #[error("ulid generation: {0}")]
+    Ulid(Box<dyn std::error::Error + Send + Sync>),
+    #[error("serialization: {0}")]
+    Serialization(#[from] serde_json::Error),
+}
 
 /// In-memory event store for testing. Thread-safe via `Mutex`.
 ///
@@ -36,14 +50,14 @@ impl MemoryStore {
         Self { backing }
     }
 
-    fn generate_ulid(&self) -> Result<String, Error> {
+    fn generate_ulid(&self) -> Result<String, MemoryStoreError> {
         self.backing
             .generator
             .lock()
             .expect("ULID generator mutex poisoned")
             .generate()
             .map(|u| u.to_string())
-            .map_err(|e| Error::Store(Box::new(e)))
+            .map_err(|e| MemoryStoreError::Ulid(Box::new(e)))
     }
 }
 
@@ -87,7 +101,9 @@ impl MemoryStore {
 }
 
 impl EventStore for MemoryStore {
-    async fn load(&self, id: &AggregateId) -> Result<Aggregate, Error> {
+    type Error = MemoryStoreError;
+
+    async fn load(&self, id: &AggregateId) -> Result<Aggregate, MemoryStoreError> {
         let streams = self.backing.streams.lock().expect("streams mutex poisoned");
 
         match streams.get(id) {
@@ -103,7 +119,7 @@ impl EventStore for MemoryStore {
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> Result<ChangeSet, Error> {
+    ) -> Result<ChangeSet, MemoryStoreError> {
         let mut streams = self.backing.streams.lock().expect("streams mutex poisoned");
 
         if events.is_empty() {
@@ -128,10 +144,10 @@ impl EventStore for MemoryStore {
                 .map(|e| e.revision.clone())
                 .unwrap_or_else(Revision::zero);
             if *expected != actual {
-                return Err(Error::RevisionConflict {
+                return Err(MemoryStoreError::WeeEvents(crate::Error::RevisionConflict {
                     expected: expected.clone(),
                     actual,
-                });
+                }));
             }
         }
 

@@ -2,7 +2,7 @@ use crate::dispatcher::Dispatcher;
 use crate::entity::Entity;
 use crate::id::{AggregateId, CommandName};
 use crate::renderer::Renderer;
-use crate::service::{CommandExecutor, EntityLoader};
+use crate::service::{CommandExecutor, EntityLoader, ServiceError};
 use crate::store::{EventStore, PublishOptions};
 
 /// Composes a `Dispatcher`, `EventStore`, `Renderer`, and context into a
@@ -42,9 +42,11 @@ where
     S: Default + Send + Sync,
     Store: EventStore,
 {
-    async fn load(&self, id: &AggregateId) -> crate::Result<Entity<S>> {
+    type Error = Store::Error;
+
+    async fn load(&self, id: &AggregateId) -> Result<Entity<S>, Store::Error> {
         let aggregate = self.store.load(id).await?;
-        self.renderer.render(&aggregate)
+        self.renderer.render(&aggregate).map_err(Store::Error::from)
     }
 }
 
@@ -54,19 +56,23 @@ where
     S: Default + Send + Sync + 'static,
     Store: EventStore,
 {
+    type Error = ServiceError<Store::Error>;
+
     async fn execute(
         &self,
         name: &CommandName,
         target: &AggregateId,
         command: serde_json::Value,
-    ) -> crate::Result<Entity<S>> {
-        let entity = self.load(target).await?;
+    ) -> Result<Entity<S>, ServiceError<Store::Error>> {
+        let entity = <Self as EntityLoader<S>>::load(self, target)
+            .await
+            .map_err(ServiceError::Store)?;
 
         let events = self
             .dispatcher
             .dispatch(&self.ctx, &entity, name, command)
             .await
-            .map_err(crate::Error::Rejection)?;
+            .map_err(ServiceError::Rejection)?;
 
         if events.is_empty() {
             return Ok(entity);
@@ -76,8 +82,13 @@ where
             expected_revision: Some(entity.revision.clone()),
             ..Default::default()
         };
-        self.store.publish(target, options, events).await?;
+        self.store
+            .publish(target, options, events)
+            .await
+            .map_err(ServiceError::Store)?;
 
-        self.load(target).await
+        <Self as EntityLoader<S>>::load(self, target)
+            .await
+            .map_err(ServiceError::Store)
     }
 }

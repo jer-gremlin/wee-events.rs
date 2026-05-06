@@ -15,7 +15,7 @@ use syn::{
 syn::custom_keyword!(loader);
 syn::custom_keyword!(handlers);
 syn::custom_keyword!(effects);
-syn::custom_keyword!(any);
+syn::custom_keyword!(all);
 syn::custom_keyword!(predicate);
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ struct EffectEntry {
 
 #[allow(dead_code)]
 enum EffectFilterSpec {
-    /// `on any`
+    /// `on all`
     All,
     /// `on [Cmd1, Cmd2, ...]` - command type paths.
     Commands(Vec<Path>),
@@ -67,8 +67,8 @@ impl Parse for EffectEntry {
             return Err(syn::Error::new(on_kw.span(), "expected `on`"));
         }
 
-        let filter = if input.peek(any) {
-            let _: any = input.parse()?;
+        let filter = if input.peek(all) {
+            let _: all = input.parse()?;
             EffectFilterSpec::All
         } else if input.peek(predicate) {
             let _: predicate = input.parse()?;
@@ -85,7 +85,7 @@ impl Parse for EffectEntry {
             let cmds: Punctuated<Path, Token![,]> = buf.parse_terminated(Path::parse, Token![,])?;
             EffectFilterSpec::Commands(cmds.into_iter().collect())
         } else {
-            return Err(input.error("expected `any`, `predicate(...)`, or `[Cmd, ...]` after `on`"));
+            return Err(input.error("expected `all`, `predicate(...)`, or `[Cmd, ...]` after `on`"));
         };
 
         Ok(EffectEntry {
@@ -587,12 +587,17 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                         #state_type,
                     >,
                 {
+                    type Error = wee_events::Error;
+
                     fn dispatch_command(
                         &self,
                         id: &wee_events::AggregateId,
                         cmd: <#sp as wee_events::HandlerSpec>::Command,
                     ) -> impl ::std::future::Future<
-                        Output = wee_events::Result<wee_events::Entity<#state_type>>,
+                        Output = ::std::result::Result<
+                            wee_events::Entity<#state_type>,
+                            wee_events::Error,
+                        >,
                     > + ::std::marker::Send {
                         let id = id.clone();
                         async move {
@@ -633,11 +638,16 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
             for<'a> &'a __L: wee_events::LoaderBridge<'a, __R, #state_type>,
             for<'a> &'a __F: wee_events::FactoryBridge<'a, __R>,
         {
+            type Error = wee_events::Error;
+
             fn load(
                 &self,
                 id: &wee_events::AggregateId,
             ) -> impl ::std::future::Future<
-                Output = wee_events::Result<wee_events::Entity<#state_type>>,
+                Output = ::std::result::Result<
+                    wee_events::Entity<#state_type>,
+                    wee_events::Error,
+                >,
             > + ::std::marker::Send {
                 let id = id.clone();
                 async move {
