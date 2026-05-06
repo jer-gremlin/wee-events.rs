@@ -25,7 +25,7 @@ pub use dispatcher::Dispatcher;
 pub use domain_service::DomainService;
 pub use entity::Entity;
 pub use error::{Error, RetryDiagnostics};
-pub use event::{ChangeSet, DomainEvent, EventData, EventMetadata, RecordedEvent};
+pub use event::{ChangeSet, DeserializeJsonError, DomainEvent, EventData, EventMetadata, RecordedEvent};
 pub use id::{
     AggregateId, AggregateIdParseError, AggregateType, CommandName, CorrelationId, EventId,
     EventType, Revision,
@@ -65,7 +65,7 @@ pub mod testing {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Helper to serialize a domain event into a `RawEvent` with JSON encoding.
-pub fn to_raw_event<E: DomainEvent + serde::Serialize>(event: &E) -> Result<RawEvent> {
+pub fn to_raw_event<E: DomainEvent + serde::Serialize>(event: &E) -> std::result::Result<RawEvent, serde_json::Error> {
     Ok(RawEvent {
         event_type: event.event_type(),
         data: EventData::json(event)?,
