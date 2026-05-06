@@ -25,6 +25,20 @@ pub enum DeserializeJsonError {
     Decode(#[from] serde_json::Error),
 }
 
+impl From<DeserializeJsonError> for crate::Error {
+    fn from(err: DeserializeJsonError) -> Self {
+        match err {
+            DeserializeJsonError::EncodingMismatch { expected, actual } => {
+                crate::Error::EncodingMismatch { expected, actual }
+            }
+            DeserializeJsonError::Decode(e) => crate::Error::EncodingMismatch {
+                expected: EventData::JSON_ENCODING.to_string(),
+                actual: format!("invalid JSON: {e}"),
+            },
+        }
+    }
+}
+
 impl EventData {
     /// The encoding identifier for JSON payloads.
     pub const JSON_ENCODING: &'static str = "application/json";
@@ -55,7 +69,9 @@ impl EventData {
     ///
     /// Returns `DeserializeJsonError::EncodingMismatch` if the payload is not
     /// JSON-encoded, or `DeserializeJsonError::Decode` if JSON parsing fails.
-    pub fn deserialize_json<T: for<'de> Deserialize<'de>>(&self) -> Result<T, DeserializeJsonError> {
+    pub fn deserialize_json<T: for<'de> Deserialize<'de>>(
+        &self,
+    ) -> Result<T, DeserializeJsonError> {
         if !self.is_json() {
             return Err(DeserializeJsonError::EncodingMismatch {
                 expected: Self::JSON_ENCODING.to_string(),
