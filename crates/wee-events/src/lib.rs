@@ -1,4 +1,5 @@
 mod aggregate;
+mod codec;
 mod command;
 mod dispatcher;
 mod domain_service;
@@ -20,6 +21,10 @@ mod bench_suite;
 mod test_suite;
 
 pub use aggregate::Aggregate;
+pub use codec::{
+    CborDecoder, CborEncoder, DecodeError, DecoderList, EncodeError, EncodesEvents, EventDecoder,
+    EventDecoders, EventEncoder, JsonDecoder, JsonEncoder,
+};
 pub use command::Command;
 pub use dispatcher::Dispatcher;
 pub use domain_service::DomainService;
@@ -69,9 +74,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Helper to serialize a domain event into a `RawEvent` with JSON encoding.
 pub fn to_raw_event<E: DomainEvent + serde::Serialize>(
     event: &E,
-) -> std::result::Result<RawEvent, serde_json::Error> {
+) -> std::result::Result<RawEvent, EncodeError> {
     Ok(RawEvent {
         event_type: event.event_type(),
-        data: EventData::json(event)?,
+        data: JsonEncoder.serialize(event)?,
     })
 }

@@ -17,6 +17,7 @@ testing = ["dep:criterion", "dep:tokio", "dep:futures"]
 __wee_events_portable = []
 
 [dependencies]
+ciborium = { workspace = true }
 criterion = { version = "0.5", features = ["async_tokio"], optional = true }
 futures = { version = "0.3", optional = true }
 serde = { workspace = true }

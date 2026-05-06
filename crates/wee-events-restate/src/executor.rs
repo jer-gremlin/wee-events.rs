@@ -47,8 +47,9 @@ impl<T: JsonService> CommandHandler<T> {
                 });
                 Err(TerminalError::new(payload.to_string()).into())
             }
-            // Decode and store errors are deterministic — don't retry.
+            // Codec and store errors are deterministic — don't retry.
             Err(Error::Decode(e)) => Err(TerminalError::new(e.to_string()).into()),
+            Err(Error::Encode(e)) => Err(TerminalError::new(e.to_string()).into()),
             Err(Error::Store(e)) => Err(TerminalError::new(e.to_string()).into()),
             // Transport and backend errors are transient — let Restate retry.
             Err(Error::Transport(e)) => Err(HandlerError::from(e)),

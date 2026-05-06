@@ -19,8 +19,8 @@ pub enum MemoryStoreError {
     WeeEvents(#[from] crate::Error),
     #[error("ulid generation: {0}")]
     Ulid(Box<dyn std::error::Error + Send + Sync>),
-    #[error("serialization: {0}")]
-    Serialization(#[from] serde_json::Error),
+    #[error("codec: {0}")]
+    Codec(#[from] crate::EncodeError),
 }
 
 impl crate::EventStoreErrorExt for MemoryStoreError {
@@ -29,6 +29,12 @@ impl crate::EventStoreErrorExt for MemoryStoreError {
             MemoryStoreError::WeeEvents(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl From<serde_json::Error> for MemoryStoreError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Codec(crate::EncodeError::Json(error))
     }
 }
 
@@ -191,5 +197,15 @@ impl EventStore for MemoryStore {
             revision,
             events: recorded,
         })
+    }
+}
+
+static JSON_ENCODER: crate::JsonEncoder = crate::JsonEncoder;
+
+impl crate::EncodesEvents for MemoryStore {
+    type Encoder = crate::JsonEncoder;
+
+    fn event_encoder(&self) -> &Self::Encoder {
+        &JSON_ENCODER
     }
 }

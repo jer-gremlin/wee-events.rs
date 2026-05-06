@@ -104,6 +104,7 @@ where
         store: SqliteEventStore::builder()
             .in_memory()
             .strategy(strategy)
+            .writer(wee_events::JsonEncoder)
             .open()
             .await
             .unwrap(),
@@ -118,6 +119,7 @@ where
     let store = SqliteEventStore::builder()
         .local(S::local_store_path(&temp_dir))
         .strategy(strategy)
+        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
@@ -323,6 +325,7 @@ async fn open_sqld_default_store_with_retry(
         match SqliteEventStore::builder()
             .sqld_default(provisioner.clone())
             .strategy(strategy)
+            .writer(wee_events::JsonEncoder)
             .open()
             .await
         {
@@ -350,6 +353,7 @@ where
         match SqliteEventStore::builder()
             .sqld_namespaced(provisioner.clone())
             .strategy(strategy.clone())
+            .writer(wee_events::JsonEncoder)
             .open()
             .await
         {
@@ -578,6 +582,7 @@ fn turso_benchmarks(c: &mut Criterion) {
         let store = SqliteEventStore::builder()
             .turso(FixedRemoteTargetProvisioner { url, auth_token })
             .strategy(GlobalStrategy)
+            .writer(wee_events::JsonEncoder)
             .open()
             .await
             .unwrap();

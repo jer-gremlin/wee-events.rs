@@ -357,6 +357,27 @@ async fn changeset_contains_published_events() {
 }
 
 #[tokio::test]
+async fn publisher_uses_store_event_encoder() {
+    let store = MemoryStore::new();
+    let publisher = wee_events::Publisher::new(&store);
+    let entity = Entity {
+        aggregate_id: AggregateId::new("counter", "writer"),
+        revision: wee_events::Revision::zero(),
+        state: CounterState::default(),
+    };
+
+    let changes = publisher
+        .publish(&entity, vec![CounterEvent::Incremented { amount: 4 }])
+        .await
+        .expect("publish should succeed");
+
+    assert_eq!(
+        changes.events[0].data.encoding,
+        <wee_events::JsonEncoder as wee_events::EventEncoder>::ENCODING
+    );
+}
+
+#[tokio::test]
 async fn derive_macros_generate_correct_names() {
     let event = CounterEvent::Incremented { amount: 1 };
     assert_eq!(event.event_type(), EventType::new("counter:incremented"));
