@@ -1,0 +1,30 @@
+error[E0599]: the method `with_effect` exists for struct `Registration<Env, Env, wee_events_restate::Ready>`, but its trait bounds were not satisfied
+  --> tests/ui/attach_to_duplicate_effect.rs:72:10
+   |
+55 | / wee_events::service! {
+56 | |     CounterService("counter") for Counter {
+57 | |         loader: load,
+58 | |         handlers: [inc],
+...  |
+63 | | }
+   | |_- method `with_effect` not found for this struct because it doesn't satisfy `_: WithEffect<_, _>`
+...
+69 |       let _endpoint = wee_events_restate::create(CounterService)
+   |  _____________________-
+70 | |         .with_env(Env)
+71 | |         .with_effect(ConsoleAuditLog)
+72 | |         .with_effect(ConsoleAuditLog)
+   | |         -^^^^^^^^^^^ method cannot be called on `Registration<Env, Env, wee_events_restate::Ready>` due to unsatisfied trait bounds
+   | |_________|
+   |
+   |
+   = note: the following trait bounds were not satisfied:
+           `Registration<Env, Env, wee_events_restate::Ready>: WithEffect<_, _>`
+note: the trait `WithEffect` must be implemented
+  --> src/lib.rs
+   |
+   | pub trait WithEffect<Effect, Requirement> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following trait defines an item `with_effect`, perhaps you need to implement it:
+           candidate #1: `WithEffect`

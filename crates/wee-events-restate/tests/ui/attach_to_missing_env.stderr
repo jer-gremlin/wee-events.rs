@@ -1,0 +1,9 @@
+error[E0599]: no method named `with_effect` found for struct `RestateServiceBuilder<Service>` in the current scope
+  --> tests/ui/attach_to_missing_env.rs:67:10
+   |
+66 |       let _endpoint = wee_events_restate::create(CounterService)
+   |  _____________________-
+67 | |         .with_effect(ConsoleAuditLog)
+   | |         -^^^^^^^^^^^ method not found in `RestateServiceBuilder<CounterService>`
+   | |_________|
+   |

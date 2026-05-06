@@ -3,7 +3,7 @@ use wee_events::{AggregateId, Entity, EventStore, HasPublisher, ServiceError};
 use crate::commands::{Increment, Randomise, Reset};
 use crate::events::CounterEvent;
 use crate::randomiser::Randomiser;
-use crate::services::audit_log::AuditLogClient;
+use crate::services::audit_log::{AuditLog, AuditLogClient};
 use crate::state::{Counter, renderer};
 
 #[wee_events::loader(requires(wee_events::EventStore))]

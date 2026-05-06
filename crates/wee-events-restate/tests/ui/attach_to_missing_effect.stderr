@@ -1,0 +1,21 @@
+error[E0599]: no method named `attach_to` found for struct `Registration<Env, Env, Needs<CounterServiceAuditLogEffect, wee_events_restate::Ready>>` in the current scope
+  --> tests/ui/attach_to_missing_effect.rs:71:10
+   |
+55 | / wee_events::service! {
+56 | |     CounterService("counter") for Counter {
+57 | |         loader: load,
+58 | |         handlers: [inc],
+...  |
+63 | | }
+   | |_- method `attach_to` not found for this struct
+...
+69 |       let _endpoint = wee_events_restate::create(CounterService)
+   |  _____________________-
+70 | |         .with_env(Env)
+71 | |         .attach_to(Endpoint::builder())
+   | |         -^^^^^^^^^ method not found in `Registration<Env, Env, Needs<CounterServiceAuditLogEffect, wee_events_restate::Ready>>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `Registration<__Store, __Services, wee_events_restate::Ready>`

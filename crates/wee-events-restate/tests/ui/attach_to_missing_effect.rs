@@ -1,34 +1,31 @@
-//! Proves that `service!` with `effects:` declarations compiles and that
-//! the emitted registration type still binds under restate-sdk's endpoint
-//! builder. End-to-end wire behaviour is out of scope for a unit test;
-//! correctness of the emitted match arms is asserted via compilation.
+#![allow(unexpected_cfgs)]
 
-#![allow(dead_code)]
-
+use restate_sdk::prelude::*;
 use wee_events::{AggregateId, Command, Entity, Revision};
 
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Counter;
+struct Counter;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Inc;
 impl Command for Inc {
-    const NAME: &'static str = "counter:increment";
+    const NAME: &'static str = "counter:inc";
 }
 
 #[restate_sdk::workflow]
-trait Notifier {
+trait AuditLog {
     async fn run(
         notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
     ) -> Result<(), restate_sdk::errors::HandlerError>;
 }
 
-struct NotifierImpl;
-impl Notifier for NotifierImpl {
+struct ConsoleAuditLog;
+
+impl AuditLog for ConsoleAuditLog {
     async fn run(
         &self,
-        _ctx: restate_sdk::prelude::WorkflowContext<'_>,
-        _n: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
+        _ctx: WorkflowContext<'_>,
+        _notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
     ) -> Result<(), restate_sdk::errors::HandlerError> {
         Ok(())
     }
@@ -49,28 +46,28 @@ async fn load<R: Send + Sync + 'static>(
 #[wee_events::handler(command = Inc)]
 async fn inc<R: Send + Sync + 'static>(
     _env: &R,
-    e: &Entity<Counter>,
+    entity: &Entity<Counter>,
     _cmd: Inc,
 ) -> wee_events::Result<Entity<Counter>> {
-    Ok(e.clone())
+    Ok(entity.clone())
 }
 
 wee_events::service! {
-    pub CounterService("counter") for Counter {
+    CounterService("counter") for Counter {
         loader: load,
         handlers: [inc],
         effects: [
-            Notifier on all,
+            AuditLog on all,
         ],
     }
 }
 
-#[test]
-fn registration_compiles_with_effects() {
-    use restate_sdk::prelude::*;
+#[derive(Clone)]
+struct Env;
+
+fn main() {
     let _endpoint = wee_events_restate::create(CounterService)
-        .with_env(())
-        .with_effect(NotifierImpl)
+        .with_env(Env)
         .attach_to(Endpoint::builder())
         .build();
 }

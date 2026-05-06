@@ -1,5 +1,5 @@
-//! Proves that `service!` emits a Restate Virtual Object binder whose
-//! binding type can be `.serve()`d and `.bind()`ed to a Restate endpoint.
+//! Proves that `service!` emits Restate Virtual Object internals whose
+//! registration type can be attached to a Restate endpoint.
 //! We don't hit the wire -- compilation of the builder chain is the
 //! assertion.
 
@@ -50,10 +50,12 @@ wee_events::service! {
 struct Env;
 
 #[test]
-fn binding_can_be_constructed_and_bound() {
+fn registration_can_be_attached() {
     use restate_sdk::prelude::*;
-    let binding = wee_events_restate::create(CounterService).with_env(Env);
-    let _endpoint = Endpoint::builder().bind(binding.serve()).build();
+    let _endpoint = wee_events_restate::create(CounterService)
+        .with_env(Env)
+        .attach_to(Endpoint::builder())
+        .build();
 }
 
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -94,8 +96,10 @@ wee_events::service! {
 }
 
 #[test]
-fn binding_internal_method_names_do_not_collide_with_wire_names() {
+fn registration_internal_method_names_do_not_collide_with_wire_names() {
     use restate_sdk::prelude::*;
-    let binding = wee_events_restate::create(WeirdCounterService).with_env(Env);
-    let _endpoint = Endpoint::builder().bind(binding.serve()).build();
+    let _endpoint = wee_events_restate::create(WeirdCounterService)
+        .with_env(Env)
+        .attach_to(Endpoint::builder())
+        .build();
 }

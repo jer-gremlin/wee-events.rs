@@ -12,6 +12,8 @@ pub mod names;
 mod service;
 mod types;
 
+use std::marker::PhantomData;
+
 pub use bundle::{service_bundle, ServiceBundle};
 pub use client::RestateClient;
 pub use correlation::correlation_id;
@@ -23,10 +25,39 @@ pub use names::{executor_name, loader_name, runner_name};
 pub use service::{JsonService, ServiceAdapter, ServiceResponse};
 pub use types::{CommandRequest, EntityResponse, ExecuteNotification, ExecuteRequest, Metadata};
 
-pub trait RestateServiceDefinition {
-    type Binding<Store, Services>;
+pub struct Ready;
 
-    fn bind<Store, Services>(store: Store, services: Services) -> Self::Binding<Store, Services>;
+pub struct Needs<Requirement, Tail> {
+    _marker: PhantomData<fn() -> (Requirement, Tail)>,
+}
+
+impl<Requirement, Tail> Needs<Requirement, Tail> {
+    pub fn new() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<Requirement, Tail> Default for Needs<Requirement, Tail> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub trait WithEffect<Effect, Requirement> {
+    type Output;
+
+    fn with_effect(self, effect: Effect) -> Self::Output;
+}
+
+pub trait RestateServiceDefinition {
+    type Registration<Store, Services>;
+
+    fn register<Store, Services>(
+        store: Store,
+        services: Services,
+    ) -> Self::Registration<Store, Services>;
 }
 
 pub struct RestateServiceBuilder<Service> {
@@ -114,12 +145,12 @@ where
         }
     }
 
-    pub fn with_env<Services>(self, services: Services) -> Service::Binding<Services, Services>
+    pub fn with_env<Services>(self, services: Services) -> Service::Registration<Services, Services>
     where
         Services: Clone,
     {
         let _ = self.service;
-        Service::bind(services.clone(), services)
+        Service::register(services.clone(), services)
     }
 }
 
@@ -127,9 +158,9 @@ impl<Service, Store> RestateServiceStoreBuilder<Service, Store>
 where
     Service: RestateServiceDefinition,
 {
-    pub fn with_env<Services>(self, services: Services) -> Service::Binding<Store, Services> {
+    pub fn with_env<Services>(self, services: Services) -> Service::Registration<Store, Services> {
         let _ = self.service;
-        Service::bind(self.store, services)
+        Service::register(self.store, services)
     }
 }
 
@@ -141,6 +172,19 @@ pub mod __private {
     pub use restate_sdk::context::Context;
     pub use restate_sdk::{context, errors, object, serde};
     pub use serde_json;
+
+    pub type AttachEffect =
+        Box<dyn FnOnce(restate_sdk::endpoint::Builder) -> restate_sdk::endpoint::Builder + Send>;
+
+    pub fn attach_effects_to(
+        mut builder: restate_sdk::endpoint::Builder,
+        effects: Vec<AttachEffect>,
+    ) -> restate_sdk::endpoint::Builder {
+        for effect in effects {
+            builder = effect(builder);
+        }
+        builder
+    }
 
     /// Implemented by error types that the macro-generated Restate path may
     /// produce. Centralising the conversion here lets a single helper
