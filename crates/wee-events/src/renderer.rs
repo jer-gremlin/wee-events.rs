@@ -2,12 +2,17 @@ use std::collections::HashMap;
 
 use crate::aggregate::Aggregate;
 use crate::entity::Entity;
-use crate::event::EventData;
+use crate::event::{DeserializeJsonError, EventData};
 use crate::id::EventType;
 
 /// A reducer function pointer. Receives mutable state, the event type, and the
 /// event data (encoding + bytes). Responsible for deserializing and applying.
-pub type ReduceFn<S> = fn(&mut S, &EventType, &EventData) -> Result<(), crate::Error>;
+///
+/// Reducers fail with [`DeserializeJsonError`] so the encoding-mismatch case
+/// (a structural store contract failure) stays distinct from a JSON decode
+/// error (a codec failure). Service layers that wrap rendering pick the
+/// appropriate carrier for each branch.
+pub type ReduceFn<S> = fn(&mut S, &EventType, &EventData) -> Result<(), DeserializeJsonError>;
 
 /// Stateless projection engine. Folds an aggregate's event stream through
 /// registered reducers to produce an `Entity<S>`.
@@ -40,7 +45,7 @@ impl<S: Default> Renderer<S> {
     /// Folds the aggregate's event stream into projected state. Unmapped event
     /// types are silently skipped — this allows cross-domain projections to
     /// selectively process only the events they care about.
-    pub fn render(&self, aggregate: &Aggregate) -> Result<Entity<S>, crate::Error> {
+    pub fn render(&self, aggregate: &Aggregate) -> Result<Entity<S>, DeserializeJsonError> {
         let mut state = S::default();
 
         for event in aggregate.events() {

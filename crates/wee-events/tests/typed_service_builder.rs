@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use wee_events::{AggregateId, Entity, Revision, ServiceBuilder};
+use wee_events::{AggregateId, Entity, Rejection, Revision, ServiceBuilder, ServiceError};
 
 // ---------------------------------------------------------------------------
 // Domain model
@@ -55,6 +55,16 @@ impl TestContext {
 }
 
 // ---------------------------------------------------------------------------
+// Shared error types
+// ---------------------------------------------------------------------------
+
+/// Loader error: plain wee_events structural errors.
+type LoaderErr = wee_events::Error;
+
+/// Handler error: richer service error that can carry domain rejections.
+type HandlerErr = ServiceError<wee_events::Error>;
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -62,7 +72,7 @@ async fn increment(
     ctx: &TestContext,
     entity: &Entity<Counter>,
     cmd: Increment,
-) -> crate::Result<Entity<Counter>> {
+) -> Result<Entity<Counter>, HandlerErr> {
     Ok(Entity {
         aggregate_id: entity.aggregate_id.clone(),
         revision: entity.revision.clone(),
@@ -72,23 +82,17 @@ async fn increment(
     })
 }
 
-/// `BuiltService` constrains handlers to return `wee_events::Error` (the
-/// structural error model). Domain rejections cannot flow through directly,
-/// so this test uses `EncodingMismatch` with a sentinel `expected` value to
-/// represent the "below zero" guard.
-const BELOW_ZERO_SENTINEL: &str = "counter:below-zero";
-
 async fn decrement(
     ctx: &TestContext,
     entity: &Entity<Counter>,
     cmd: Decrement,
-) -> crate::Result<Entity<Counter>> {
+) -> Result<Entity<Counter>, HandlerErr> {
     let new_value = entity.state.value - cmd.amount - ctx.bonus();
     if new_value < 0 {
-        return Err(wee_events::Error::EncodingMismatch {
-            expected: BELOW_ZERO_SENTINEL.into(),
-            actual: "counter cannot go below zero".into(),
-        });
+        return Err(ServiceError::Rejection(Rejection::new(
+            "BELOW_ZERO",
+            "counter cannot go below zero",
+        )));
     }
     Ok(Entity {
         aggregate_id: entity.aggregate_id.clone(),
@@ -104,15 +108,13 @@ async fn decrement(
 async fn load_counter(
     _ctx: &TestContext,
     id: &wee_events::AggregateId,
-) -> crate::Result<Entity<Counter>> {
+) -> Result<Entity<Counter>, LoaderErr> {
     Ok(Entity {
         aggregate_id: id.clone(),
         revision: Revision::zero(),
         state: Counter::default(),
     })
 }
-
-type Result<T> = std::result::Result<T, wee_events::Error>;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -122,6 +124,7 @@ type Result<T> = std::result::Result<T, wee_events::Error>;
 async fn load_returns_default_entity() {
     let service = ServiceBuilder::<Counter>::new()
         .with_loader(load_counter)
+        .with_errors::<LoaderErr, HandlerErr>()
         .with_handler::<Increment, _>(increment)
         .build(|| async { Ok(TestContext::default()) });
 
@@ -136,6 +139,7 @@ async fn load_returns_default_entity() {
 async fn execute_dispatches_to_increment_handler() {
     let service = ServiceBuilder::<Counter>::new()
         .with_loader(load_counter)
+        .with_errors::<LoaderErr, HandlerErr>()
         .with_handler::<Increment, _>(increment)
         .build(|| async { Ok(TestContext::default()) });
 
@@ -149,6 +153,7 @@ async fn execute_dispatches_to_increment_handler() {
 async fn execute_dispatches_to_correct_handler_among_multiple() {
     let service = ServiceBuilder::<Counter>::new()
         .with_loader(load_counter)
+        .with_errors::<LoaderErr, HandlerErr>()
         .with_handler::<Increment, _>(increment)
         .with_handler::<Decrement, _>(decrement)
         .build(|| async { Ok(TestContext::default()) });
@@ -167,7 +172,7 @@ async fn execute_dispatches_to_correct_handler_among_multiple() {
     let entity = service.execute(&id, Decrement { amount: 0 }).await.unwrap();
     assert_eq!(entity.state.value, 0);
 
-    // Verify that Decrement's business rule fires correctly (0 - 1 → guard).
+    // Verify that Decrement's business rule fires correctly (0 - 1 → rejection).
     let err = service
         .execute(&id, Decrement { amount: 1 })
         .await
@@ -175,10 +180,9 @@ async fn execute_dispatches_to_correct_handler_among_multiple() {
     assert!(
         matches!(
             err,
-            wee_events::Error::EncodingMismatch { ref expected, .. }
-            if expected == BELOW_ZERO_SENTINEL,
+            ServiceError::Rejection(ref r) if r.code == "BELOW_ZERO"
         ),
-        "expected below-zero sentinel, got: {err}",
+        "expected BELOW_ZERO rejection, got: {err}",
     );
 }
 
@@ -186,6 +190,7 @@ async fn execute_dispatches_to_correct_handler_among_multiple() {
 async fn execute_handler_rejection_propagates_as_error() {
     let service = ServiceBuilder::<Counter>::new()
         .with_loader(load_counter)
+        .with_errors::<LoaderErr, HandlerErr>()
         .with_handler::<Decrement, _>(decrement)
         .build(|| async { Ok(TestContext::default()) });
 
@@ -197,10 +202,10 @@ async fn execute_handler_rejection_propagates_as_error() {
         .unwrap_err();
 
     match err {
-        wee_events::Error::EncodingMismatch { expected, .. } => {
-            assert_eq!(expected, BELOW_ZERO_SENTINEL);
+        ServiceError::Rejection(r) => {
+            assert_eq!(r.code, "BELOW_ZERO");
         }
-        other => panic!("expected below-zero sentinel, got: {other}"),
+        other => panic!("expected BELOW_ZERO rejection, got: {other}"),
     }
 }
 
@@ -211,6 +216,7 @@ async fn factory_called_once_per_operation() {
 
     let service = ServiceBuilder::<Counter>::new()
         .with_loader(load_counter)
+        .with_errors::<LoaderErr, HandlerErr>()
         .with_handler::<Increment, _>(increment)
         .build(move || {
             let counter = Arc::clone(&counter);
@@ -236,6 +242,7 @@ async fn factory_called_once_per_operation() {
 async fn factory_context_bonus_applied_in_handler() {
     let service = ServiceBuilder::<Counter>::new()
         .with_loader(load_counter)
+        .with_errors::<LoaderErr, HandlerErr>()
         .with_handler::<Increment, _>(increment)
         .build(|| async { Ok(TestContext { bonus: 10 }) });
 

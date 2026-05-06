@@ -33,6 +33,7 @@ pub struct RawEvent {
 /// generated durable adapters can hold store references across async boundaries.
 pub trait EventStore: Send + Sync {
     type Error: From<crate::Error>
+        + From<serde_json::Error>
         + crate::EventStoreErrorExt
         + std::error::Error
         + Send

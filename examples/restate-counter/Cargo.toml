@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[lints.rust]
+# Macro-emitted `#[cfg(feature = "__wee_events_portable")]` references a
+# feature only defined on the wee-events crate; allow the cfg here.
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(feature, values(\"__wee_events_portable\"))"] }
+
 [dependencies]
 wee-events = { path = "../../crates/wee-events" }
 wee-events-restate = { path = "../../crates/wee-events-restate" }

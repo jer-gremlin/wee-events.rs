@@ -1,5 +1,6 @@
 use crate::command::Command;
 use crate::entity::Entity;
+use crate::event::DeserializeJsonError;
 use crate::id::{AggregateId, CommandName};
 
 /// A structured rejection from the domain layer. Indicates a command was
@@ -55,6 +56,36 @@ pub enum ServiceError<E: std::error::Error + Send + Sync + 'static> {
     Store(E),
     #[error("serialization error: {0}")]
     Codec(#[from] serde_json::Error),
+}
+
+/// Lift a [`DeserializeJsonError`] into a [`ServiceError`]: encoding-mismatch
+/// is a structural store-contract failure (routed through `Store(E)` via the
+/// store error's `From<crate::Error>` impl), and a decode failure is a codec
+/// failure (routed through `Codec`).
+impl<E> From<DeserializeJsonError> for ServiceError<E>
+where
+    E: From<crate::Error> + std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: DeserializeJsonError) -> Self {
+        match err {
+            DeserializeJsonError::EncodingMismatch { expected, actual } => {
+                ServiceError::Store(E::from(crate::Error::EncodingMismatch { expected, actual }))
+            }
+            DeserializeJsonError::Decode(e) => ServiceError::Codec(e),
+        }
+    }
+}
+
+/// Lift a [`crate::Error`] into a [`ServiceError`] via the inner store error's
+/// `From<crate::Error>` impl. This satisfies the `EH: From<crate::Error>` bound
+/// on `BuiltService` so handlers can use `ServiceError<E>` as their error type.
+impl<E> From<crate::Error> for ServiceError<E>
+where
+    E: From<crate::Error> + std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: crate::Error) -> Self {
+        ServiceError::Store(E::from(err))
+    }
 }
 
 /// Loads projected entity state for an aggregate.
@@ -170,10 +201,12 @@ pub trait Handles<C>: __private::DispatchCommand<C> {}
 ///
 /// - `DomainService` uses `ServiceError<Store::Error>` for `execute`,
 ///   surfacing rejections and codec failures distinctly.
-/// - `BuiltService` (from the `service!` macro) emits
-///   `type Error = wee_events::Error` for both `load` and `execute`. This
-///   contract cannot surface domain rejections — a known limitation while
-///   `service_builder.rs` is migrated to thread `ServiceError`.
+/// - `BuiltService` (from the `service!` macro) carries two error generics
+///   (`EL` for the loader, `EH` for handlers) so handlers can return a
+///   richer service error such as `ServiceError<Store::Error>` directly,
+///   while the loader retains its own error. The macro emits a
+///   `TypedService::Error` equal to `EL` and per-command
+///   `DispatchCommand::Error` equal to `EH`.
 pub trait TypedService<S>: __private::ServiceState<State = S> + Send + Sync {
     type Error;
 

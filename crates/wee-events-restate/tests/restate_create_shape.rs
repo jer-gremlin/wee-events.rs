@@ -31,10 +31,27 @@ impl CounterStore for FixedStore {
     }
 }
 
-impl EventStore for FixedStore {
-    type Error = wee_events::Error;
+#[derive(Debug, thiserror::Error)]
+pub enum FixedStoreError {
+    #[error(transparent)]
+    WeeEvents(#[from] wee_events::Error),
+    #[error(transparent)]
+    Serialization(#[from] serde_json::Error),
+}
 
-    async fn load(&self, id: &AggregateId) -> wee_events::Result<Aggregate> {
+impl wee_events::EventStoreErrorExt for FixedStoreError {
+    fn as_wee_events(&self) -> Option<&wee_events::Error> {
+        match self {
+            FixedStoreError::WeeEvents(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl EventStore for FixedStore {
+    type Error = FixedStoreError;
+
+    async fn load(&self, id: &AggregateId) -> Result<Aggregate, FixedStoreError> {
         Ok(Aggregate::empty(id.clone()))
     }
 
@@ -43,7 +60,7 @@ impl EventStore for FixedStore {
         aggregate_id: &AggregateId,
         _options: PublishOptions,
         _events: Vec<RawEvent>,
-    ) -> wee_events::Result<ChangeSet> {
+    ) -> Result<ChangeSet, FixedStoreError> {
         Ok(ChangeSet {
             aggregate_id: aggregate_id.clone(),
             revision: Revision::zero(),

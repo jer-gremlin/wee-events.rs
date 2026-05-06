@@ -52,7 +52,7 @@ fn reduce_incremented(
     state: &mut Counter,
     _event_type: &EventType,
     data: &EventData,
-) -> Result<(), wee_events::Error> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     let v: serde_json::Value = data.deserialize_json()?;
     state.value += v["amount"].as_i64().unwrap_or(0);
     Ok(())
@@ -62,7 +62,7 @@ fn reduce_decremented(
     state: &mut Counter,
     _event_type: &EventType,
     data: &EventData,
-) -> Result<(), wee_events::Error> {
+) -> Result<(), wee_events::DeserializeJsonError> {
     let v: serde_json::Value = data.deserialize_json()?;
     state.value -= v["amount"].as_i64().unwrap_or(0);
     Ok(())

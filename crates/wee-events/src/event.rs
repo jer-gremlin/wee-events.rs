@@ -17,26 +17,18 @@ pub struct EventData {
 }
 
 /// Error returned by [`EventData::deserialize_json`].
+///
+/// The two variants distinguish a structural failure (the payload is not in
+/// the expected encoding) from a codec failure (the bytes are JSON but did not
+/// deserialize into the target type). Callers can preserve that distinction
+/// when mapping into a service-level error rather than collapsing both into
+/// a single stringly-typed message.
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeJsonError {
     #[error("encoding mismatch: expected {expected}, actual {actual}")]
     EncodingMismatch { expected: String, actual: String },
     #[error(transparent)]
     Decode(#[from] serde_json::Error),
-}
-
-impl From<DeserializeJsonError> for crate::Error {
-    fn from(err: DeserializeJsonError) -> Self {
-        match err {
-            DeserializeJsonError::EncodingMismatch { expected, actual } => {
-                crate::Error::EncodingMismatch { expected, actual }
-            }
-            DeserializeJsonError::Decode(e) => crate::Error::EncodingMismatch {
-                expected: EventData::JSON_ENCODING.to_string(),
-                actual: format!("invalid JSON: {e}"),
-            },
-        }
-    }
 }
 
 impl EventData {
