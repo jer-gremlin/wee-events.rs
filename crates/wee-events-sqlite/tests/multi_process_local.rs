@@ -103,7 +103,10 @@ async fn stale_revision_conflicts_across_store_instances() {
         .expect_err("stale revision should be rejected");
 
     assert!(
-        matches!(error, wee_events::Error::RevisionConflict { .. }),
+        matches!(
+            error,
+            wee_events_sqlite::Error::WeeEvents(wee_events::Error::RevisionConflict { .. })
+        ),
         "unexpected error: {error}"
     );
 }
