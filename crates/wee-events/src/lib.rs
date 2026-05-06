@@ -36,7 +36,7 @@ pub use renderer::{ReduceFn, Renderer};
 pub use service::__private;
 pub use service::{
     CommandExecutor, EntityLoader, Handles, HasCommand, Rejection, Service, ServiceDefinition,
-    TypedService,
+    ServiceError, TypedService,
 };
 pub use service_builder::{BuiltService, ServiceBuilder};
 #[doc(hidden)]
