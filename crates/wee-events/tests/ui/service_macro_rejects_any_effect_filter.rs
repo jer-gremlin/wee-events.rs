@@ -1,5 +1,5 @@
-//! Compile-fail witness: after the optional `effects:` block, the service body
-//! must reject any trailing fields instead of silently ignoring them.
+//! Compile-fail witness: side-effect filters use `all`; the older `any`
+//! spelling is intentionally rejected.
 
 use wee_events::{AggregateId, Command, Entity, Revision};
 
@@ -40,9 +40,8 @@ wee_events::service! {
         loader: load,
         handlers: [inc],
         effects: [
-            AuditLog on all,
+            AuditLog on any,
         ],
-        effectz: [],
     }
 }
 
