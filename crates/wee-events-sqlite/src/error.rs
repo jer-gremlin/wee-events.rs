@@ -19,39 +19,23 @@ pub enum Error {
     WeeEvents(#[from] wee_events::Error),
 }
 
-impl From<Error> for wee_events::Error {
-    fn from(error: Error) -> Self {
-        match error {
-            Error::WeeEvents(inner) => inner,
-            Error::Serialization(inner) => wee_events::Error::Serialization(inner),
-            other => wee_events::Error::Store(Box::new(other)),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::Error;
     use wee_events::{RetryDiagnostics, Revision};
 
     #[test]
-    fn sqlite_serialization_errors_remain_domain_serialization_errors() {
+    fn sqlite_serialization_errors_display_includes_inner_message() {
         let sqlite_error = Error::Serialization(
             serde_json::from_str::<serde_json::Value>("{invalid json")
                 .expect_err("invalid JSON should fail"),
         );
 
-        let error: wee_events::Error = sqlite_error.into();
-
-        assert!(matches!(error, wee_events::Error::Serialization(_)));
-    }
-
-    #[test]
-    fn sqlite_internal_errors_become_domain_store_errors() {
-        let error: wee_events::Error = Error::Internal("boom".to_string()).into();
-
-        assert!(matches!(error, wee_events::Error::Store(_)));
-        assert_eq!(error.to_string(), "internal error: boom");
+        let rendered = sqlite_error.to_string();
+        assert!(
+            rendered.starts_with("serialization error: "),
+            "unexpected display: {rendered}"
+        );
     }
 
     #[test]
@@ -62,17 +46,16 @@ mod tests {
             possible_clock_skew_ms: Some(17),
         };
 
-        let error: wee_events::Error = Error::WeeEvents(wee_events::Error::RetryExhausted {
+        let error = Error::WeeEvents(wee_events::Error::RetryExhausted {
             attempts: 5,
             diagnostics: diagnostics.clone(),
-        })
-        .into();
+        });
 
         match error {
-            wee_events::Error::RetryExhausted {
+            Error::WeeEvents(wee_events::Error::RetryExhausted {
                 attempts,
                 diagnostics: actual,
-            } => {
+            }) => {
                 assert_eq!(attempts, 5);
                 assert_eq!(actual, diagnostics);
             }

@@ -838,8 +838,10 @@ where
     S: PartitionStrategy,
     C: PartitionCatalog<S::Partition>,
 {
-    async fn load(&self, id: &AggregateId) -> Result<Aggregate, wee_events::Error> {
-        self.load_aggregate(id).await.map_err(Into::into)
+    type Error = Error;
+
+    async fn load(&self, id: &AggregateId) -> Result<Aggregate, Self::Error> {
+        self.load_aggregate(id).await
     }
 
     async fn publish(
@@ -847,10 +849,9 @@ where
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> Result<ChangeSet, wee_events::Error> {
+    ) -> Result<ChangeSet, Self::Error> {
         self.publish_to_aggregate(aggregate_id, options, events)
             .await
-            .map_err(Into::into)
     }
 }
 
