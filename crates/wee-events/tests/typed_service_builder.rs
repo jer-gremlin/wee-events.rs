@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use wee_events::{AggregateId, Entity, Rejection, Revision, ServiceBuilder};
+use wee_events::{AggregateId, Entity, Revision, ServiceBuilder};
 
 // ---------------------------------------------------------------------------
 // Domain model
@@ -72,6 +72,12 @@ async fn increment(
     })
 }
 
+/// `BuiltService` constrains handlers to return `wee_events::Error` (the
+/// structural error model). Domain rejections cannot flow through directly,
+/// so this test uses `EncodingMismatch` with a sentinel `expected` value to
+/// represent the "below zero" guard.
+const BELOW_ZERO_SENTINEL: &str = "counter:below-zero";
+
 async fn decrement(
     ctx: &TestContext,
     entity: &Entity<Counter>,
@@ -79,7 +85,10 @@ async fn decrement(
 ) -> crate::Result<Entity<Counter>> {
     let new_value = entity.state.value - cmd.amount - ctx.bonus();
     if new_value < 0 {
-        return Err(Rejection::new("BELOW_ZERO", "counter cannot go below zero").into());
+        return Err(wee_events::Error::EncodingMismatch {
+            expected: BELOW_ZERO_SENTINEL.into(),
+            actual: "counter cannot go below zero".into(),
+        });
     }
     Ok(Entity {
         aggregate_id: entity.aggregate_id.clone(),
@@ -158,12 +167,19 @@ async fn execute_dispatches_to_correct_handler_among_multiple() {
     let entity = service.execute(&id, Decrement { amount: 0 }).await.unwrap();
     assert_eq!(entity.state.value, 0);
 
-    // Verify that Decrement's business rule fires correctly (0 - 1 → rejection).
+    // Verify that Decrement's business rule fires correctly (0 - 1 → guard).
     let err = service
         .execute(&id, Decrement { amount: 1 })
         .await
         .unwrap_err();
-    assert!(matches!(err, wee_events::Error::Rejection(r) if r.code == "BELOW_ZERO"));
+    assert!(
+        matches!(
+            err,
+            wee_events::Error::EncodingMismatch { ref expected, .. }
+            if expected == BELOW_ZERO_SENTINEL,
+        ),
+        "expected below-zero sentinel, got: {err}",
+    );
 }
 
 #[tokio::test]
@@ -181,8 +197,10 @@ async fn execute_handler_rejection_propagates_as_error() {
         .unwrap_err();
 
     match err {
-        wee_events::Error::Rejection(r) => assert_eq!(r.code, "BELOW_ZERO"),
-        other => panic!("expected Rejection, got: {other}"),
+        wee_events::Error::EncodingMismatch { expected, .. } => {
+            assert_eq!(expected, BELOW_ZERO_SENTINEL);
+        }
+        other => panic!("expected below-zero sentinel, got: {other}"),
     }
 }
 

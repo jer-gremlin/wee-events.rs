@@ -178,9 +178,14 @@ async fn portable_service_reloads_after_void_handler() {
 async fn caller<T>(svc: &T, id: &AggregateId) -> wee_events::Result<Entity<Counter>>
 where
     T: TypedService<Counter> + Handles<Increment> + Handles<Adjust>,
+    <T as wee_events::__private::DispatchCommand<Increment>>::Error: Into<wee_events::Error>,
+    <T as wee_events::__private::DispatchCommand<Adjust>>::Error: Into<wee_events::Error>,
 {
-    let _ = svc.execute(id, Increment { amount: 1 }).await?;
-    svc.execute(id, Adjust).await
+    let _ = svc
+        .execute(id, Increment { amount: 1 })
+        .await
+        .map_err(Into::into)?;
+    svc.execute(id, Adjust).await.map_err(Into::into)
 }
 
 #[tokio::test]

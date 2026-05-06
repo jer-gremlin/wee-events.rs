@@ -3,6 +3,7 @@ use serde_json::json;
 use wee_events::{
     memory::MemoryStore, AggregateId, CommandExecutor, CommandName, Dispatcher, DomainService,
     Entity, EntityLoader, EventData, EventType, RawEvent, Rejection, Renderer, Service,
+    ServiceError,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -134,7 +135,7 @@ async fn handler_rejection_propagates() {
         .unwrap_err();
 
     match err {
-        wee_events::Error::Rejection(r) => assert_eq!(r.code, "INSUFFICIENT_VALUE"),
+        ServiceError::Rejection(r) => assert_eq!(r.code, "INSUFFICIENT_VALUE"),
         other => panic!("expected Rejection, got: {other}"),
     }
 }
@@ -150,7 +151,7 @@ async fn unknown_command_rejected() {
         .unwrap_err();
 
     match err {
-        wee_events::Error::Rejection(r) => assert_eq!(r.code, "HANDLER_NOT_FOUND"),
+        ServiceError::Rejection(r) => assert_eq!(r.code, "HANDLER_NOT_FOUND"),
         other => panic!("expected Rejection, got: {other}"),
     }
 }
@@ -159,7 +160,11 @@ async fn unknown_command_rejected() {
 async fn service_blanket_impl_works() {
     let svc = build_service();
 
-    async fn use_service(svc: &impl Service<Counter>) {
+    async fn use_service<S>(svc: &S)
+    where
+        S: Service<Counter>,
+        <S as CommandExecutor<Counter>>::Error: std::fmt::Debug,
+    {
         let id: AggregateId = "counter:svc".parse().unwrap();
         let entity = svc
             .execute(&CommandName::from("increment"), &id, json!({ "amount": 1 }))

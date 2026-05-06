@@ -31,6 +31,8 @@ impl wee_events::__private::ServiceState for TestService {
 
 // Implement DispatchCommand<Increment> — required by Handles<Increment>
 impl wee_events::__private::DispatchCommand<Increment> for TestService {
+    type Error = wee_events::Error;
+
     fn dispatch_command(
         &self,
         id: &AggregateId,
@@ -50,6 +52,8 @@ impl wee_events::__private::DispatchCommand<Increment> for TestService {
 impl Handles<Increment> for TestService {}
 
 impl TypedService<Counter> for TestService {
+    type Error = wee_events::Error;
+
     fn load(
         &self,
         id: &AggregateId,
