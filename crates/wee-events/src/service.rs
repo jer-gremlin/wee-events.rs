@@ -41,6 +41,22 @@ impl Rejection {
     }
 }
 
+/// Error returned by service-layer operations.
+///
+/// `Rejection` is a domain-level refusal from a command handler.
+/// `Store(E)` is a backend failure from the underlying store.
+/// `Codec(serde_json::Error)` is a JSON serialization failure at
+/// the service boundary.
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceError<E: std::error::Error + Send + Sync + 'static> {
+    #[error(transparent)]
+    Rejection(#[from] Rejection),
+    #[error(transparent)]
+    Store(E),
+    #[error("serialization error: {0}")]
+    Codec(#[from] serde_json::Error),
+}
+
 /// Loads projected entity state for an aggregate.
 ///
 /// This is the "read" half of a service — given an aggregate ID, return
