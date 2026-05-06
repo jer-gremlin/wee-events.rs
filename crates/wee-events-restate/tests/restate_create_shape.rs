@@ -32,6 +32,8 @@ impl CounterStore for FixedStore {
 }
 
 impl EventStore for FixedStore {
+    type Error = wee_events::Error;
+
     async fn load(&self, id: &AggregateId) -> wee_events::Result<Aggregate> {
         Ok(Aggregate::empty(id.clone()))
     }
@@ -113,7 +115,8 @@ async fn randomise<R: wee_events::HasPublisher + Randomizer>(
     let amount = env.amount(command.min, command.max).await?;
     env.publisher()
         .publish(entity, vec![CounterEvent::Randomised { amount }])
-        .await?;
+        .await
+        .expect("publish should succeed");
     Ok(())
 }
 

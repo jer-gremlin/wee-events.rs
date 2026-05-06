@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use serde::de::DeserializeOwned;
 use wee_events::{AggregateId, CommandName, Entity, Rejection, ServiceDefinition};
 
+use crate::error::Error;
 use crate::names;
 use crate::types::{CommandRequest, ExecuteRequest, Metadata};
 
@@ -50,7 +51,7 @@ impl<D: ServiceDefinition> RestateClient<D> {
         target: &AggregateId,
         command: serde_json::Value,
         idempotency_key: impl Into<String>,
-    ) -> wee_events::Result<Entity<D::State>>
+    ) -> Result<Entity<D::State>, Error>
     where
         D::State: DeserializeOwned,
     {
@@ -78,33 +79,24 @@ impl<D: ServiceDefinition> RestateClient<D> {
             idempotency_key,
         );
 
-        let resp = self
-            .http
-            .post(&url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
+        let resp = self.http.post(&url).json(&request).send().await?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             if let Ok(rejection) = serde_json::from_str::<Rejection>(&text) {
-                return Err(wee_events::Error::Rejection(rejection));
+                return Err(Error::Rejection(rejection));
             }
             if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(message) = envelope.get("message").and_then(|m| m.as_str()) {
                     if let Ok(rejection) = serde_json::from_str::<Rejection>(message) {
-                        return Err(wee_events::Error::Rejection(rejection));
+                        return Err(Error::Rejection(rejection));
                     }
                 }
             }
-            return Err(wee_events::Error::Store(text.into()));
+            return Err(Error::Backend(text));
         }
 
-        let exec_resp: crate::types::EntityResponse = resp
-            .json()
-            .await
-            .map_err(|e| wee_events::Error::Store(Box::new(e)))?;
+        let exec_resp: crate::types::EntityResponse = resp.json().await?;
 
         let state: D::State = serde_json::from_value(exec_resp.state)?;
         Ok(Entity {
@@ -139,11 +131,9 @@ where
     C: wee_events::Command + serde::Serialize + Send + 'static,
     D::State: DeserializeOwned + Send + 'static,
 {
-    async fn dispatch_command(
-        &self,
-        id: &AggregateId,
-        cmd: C,
-    ) -> wee_events::Result<Entity<D::State>> {
+    type Error = Error;
+
+    async fn dispatch_command(&self, id: &AggregateId, cmd: C) -> Result<Entity<D::State>, Error> {
         let http = self.http.clone();
         let url = self.ingress_url.clone();
         let value = serde_json::to_value(&cmd)?;
@@ -172,7 +162,9 @@ where
     D: ServiceDefinition,
     D::State: DeserializeOwned + Send + 'static,
 {
-    async fn load(&self, id: &AggregateId) -> wee_events::Result<Entity<D::State>> {
+    type Error = Error;
+
+    async fn load(&self, id: &AggregateId) -> Result<Entity<D::State>, Error> {
         let http = self.http.clone();
         let url = self.ingress_url.clone();
         crate::generated::load::<D::State>(&http, &url, D::SERVICE_NAME, id.clone()).await
