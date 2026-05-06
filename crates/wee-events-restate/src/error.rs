@@ -13,6 +13,9 @@ pub enum Error {
     #[error("decode: {0}")]
     Decode(#[from] serde_json::Error),
 
+    #[error("encode: {0}")]
+    Encode(#[from] wee_events::EncodeError),
+
     #[error("backend: {0}")]
     Backend(String),
 
@@ -35,7 +38,7 @@ where
     fn from(value: ServiceError<E>) -> Self {
         match value {
             ServiceError::Rejection(r) => Error::Rejection(r),
-            ServiceError::Codec(e) => Error::Decode(e),
+            ServiceError::Codec(e) => Error::Encode(e),
             ServiceError::Store(e) => Error::Backend(e.to_string()),
         }
     }

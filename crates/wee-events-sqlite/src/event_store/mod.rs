@@ -9,7 +9,8 @@ mod types;
 pub type SqliteEventStore<
     S = strategies::GlobalStrategy,
     C = backends::LocalPartitionCatalog<strategies::GlobalStrategy>,
-> = store::EventStore<S, C>;
+    W = wee_events::JsonEncoder,
+> = store::EventStore<S, C, W>;
 pub use store::{InMemoryStore, LocalStore, NamedRemoteStore, RemoteStore, SingleRemoteStore};
 pub use strategies::{
     AggregatePartition, AggregateStrategy, BucketPartition, GlobalPartition, GlobalStrategy,

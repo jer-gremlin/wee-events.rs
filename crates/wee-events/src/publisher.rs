@@ -1,7 +1,8 @@
 use crate::entity::Entity;
 use crate::event::{ChangeSet, DomainEvent};
 use crate::service::ServiceError;
-use crate::store::{EventStore, PublishOptions};
+use crate::store::{EventStore, PublishOptions, RawEvent};
+use crate::EventEncoder;
 
 /// Publishes typed domain events for an aggregate entity.
 pub struct Publisher<'a, Store> {
@@ -16,7 +17,7 @@ impl<'a, Store> Publisher<'a, Store> {
 
 impl<Store> Publisher<'_, Store>
 where
-    Store: EventStore,
+    Store: EventStore + crate::EncodesEvents,
 {
     pub async fn publish<S, E>(
         &self,
@@ -26,10 +27,16 @@ where
     where
         E: DomainEvent,
     {
+        let encoder = self.store.event_encoder();
         let raw_events = events
             .iter()
-            .map(crate::to_raw_event)
-            .collect::<Result<Vec<_>, _>>()
+            .map(|event| {
+                Ok(RawEvent {
+                    event_type: event.event_type(),
+                    data: encoder.serialize(event)?,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::EncodeError>>()
             .map_err(ServiceError::Codec)?;
 
         self.store
@@ -47,7 +54,7 @@ where
 }
 
 pub trait HasPublisher: Send + Sync {
-    type Store: EventStore;
+    type Store: EventStore + crate::EncodesEvents;
 
     fn publisher(&self) -> Publisher<'_, Self::Store>;
 }

@@ -44,33 +44,42 @@ const MAX_RETRY_DELAY_MS: u64 = 64;
 /// [`AggregateStrategy`] — one per aggregate), the connection map grows
 /// monotonically. Long-running processes with many distinct aggregates should
 /// consider a bounded strategy like [`HashedStrategy`] or [`TypeStrategy`].
-pub struct EventStore<S = GlobalStrategy, C = LocalPartitionCatalog<GlobalStrategy>>
-where
+pub struct EventStore<
+    S = GlobalStrategy,
+    C = LocalPartitionCatalog<GlobalStrategy>,
+    W = wee_events::JsonEncoder,
+> where
     S: PartitionStrategy,
     C: PartitionCatalog<S::Partition>,
+    W: wee_events::EventEncoder,
 {
     strategy: S,
     catalog: C,
+    writer: W,
     connections: AsyncMutex<HashMap<S::Partition, SharedConnection>>,
     known_partitions: AsyncMutex<BTreeSet<S::Partition>>,
     generator: Mutex<Generator>,
 }
 
-pub type LocalStore<S> = EventStore<S, LocalPartitionCatalog<S>>;
-pub type InMemoryStore<S> =
-    EventStore<S, SingleTargetCatalog<<S as PartitionStrategy>::Partition, InMemoryTargetResolver>>;
-pub type SingleRemoteStore<S, R> =
-    EventStore<S, SingleTargetCatalog<<S as PartitionStrategy>::Partition, R>>;
-pub type NamedRemoteStore<S, R> = EventStore<S, NamedTargetCatalog<S, R>>;
-pub type RemoteStore<S, C> = EventStore<S, C>;
+pub type LocalStore<S, W = wee_events::JsonEncoder> = EventStore<S, LocalPartitionCatalog<S>, W>;
+pub type InMemoryStore<S, W = wee_events::JsonEncoder> = EventStore<
+    S,
+    SingleTargetCatalog<<S as PartitionStrategy>::Partition, InMemoryTargetResolver>,
+    W,
+>;
+pub type SingleRemoteStore<S, R, W = wee_events::JsonEncoder> =
+    EventStore<S, SingleTargetCatalog<<S as PartitionStrategy>::Partition, R>, W>;
+pub type NamedRemoteStore<S, R, W = wee_events::JsonEncoder> =
+    EventStore<S, NamedTargetCatalog<S, R>, W>;
+pub type RemoteStore<S, C, W = wee_events::JsonEncoder> = EventStore<S, C, W>;
 
-impl EventStore<GlobalStrategy, LocalPartitionCatalog<GlobalStrategy>> {
-    pub fn builder() -> EventStoreBuilder<MissingBackend, MissingStrategy<()>> {
+impl EventStore<GlobalStrategy, LocalPartitionCatalog<GlobalStrategy>, wee_events::JsonEncoder> {
+    pub fn builder() -> EventStoreBuilder<MissingBackend, MissingStrategy<()>, MissingWriter> {
         EventStoreBuilder::new()
     }
 }
 
-impl<S> EventStore<S, LocalPartitionCatalog<S>>
+impl<S> EventStore<S, LocalPartitionCatalog<S>, wee_events::JsonEncoder>
 where
     S: LocalPartitionStrategy,
 {
@@ -82,6 +91,7 @@ where
         let store = EventStore::from_catalog(
             strategy.clone(),
             LocalPartitionCatalog::new(path.as_ref().to_path_buf(), strategy)?,
+            wee_events::JsonEncoder,
         );
 
         for partition in store.strategy.bootstrap_partitions() {
@@ -92,16 +102,18 @@ where
     }
 }
 
-impl<S, C> EventStore<S, C>
+impl<S, C, W> EventStore<S, C, W>
 where
     S: PartitionStrategy,
     C: PartitionCatalog<S::Partition>,
+    W: wee_events::EventEncoder,
 {
     /// Builds a store from a custom partition catalog.
-    pub fn from_catalog(strategy: S, catalog: C) -> Self {
+    pub fn from_catalog(strategy: S, catalog: C, writer: W) -> Self {
         Self {
             strategy,
             catalog,
+            writer,
             connections: AsyncMutex::new(HashMap::new()),
             known_partitions: AsyncMutex::new(BTreeSet::new()),
             generator: Mutex::new(Generator::new()),
@@ -581,50 +593,72 @@ pub struct TursoBackend<R> {
 
 pub struct MissingStrategy<P>(PhantomData<P>);
 pub struct WithStrategy<S>(S);
+pub struct MissingWriter;
+pub struct WithWriter<W>(W);
 
-pub struct EventStoreBuilder<B, T> {
+pub struct EventStoreBuilder<B, T, W> {
     backend: B,
     strategy: T,
+    writer: W,
 }
 
-impl EventStoreBuilder<MissingBackend, MissingStrategy<()>> {
+impl EventStoreBuilder<MissingBackend, MissingStrategy<()>, MissingWriter> {
     fn new() -> Self {
         Self {
             backend: MissingBackend,
             strategy: MissingStrategy(PhantomData),
+            writer: MissingWriter,
         }
     }
+}
 
+impl<B, T, CurrentWriter> EventStoreBuilder<B, T, CurrentWriter> {
+    pub fn writer<W>(self, writer: W) -> EventStoreBuilder<B, T, WithWriter<W>>
+    where
+        W: wee_events::EventEncoder,
+    {
+        EventStoreBuilder {
+            backend: self.backend,
+            strategy: self.strategy,
+            writer: WithWriter(writer),
+        }
+    }
+}
+
+impl<W> EventStoreBuilder<MissingBackend, MissingStrategy<()>, W> {
     pub fn local(
         self,
         path: impl AsRef<Path>,
-    ) -> EventStoreBuilder<LocalBackend, MissingStrategy<()>> {
+    ) -> EventStoreBuilder<LocalBackend, MissingStrategy<()>, W> {
         EventStoreBuilder {
             backend: LocalBackend {
                 path: path.as_ref().to_path_buf(),
             },
             strategy: self.strategy,
+            writer: self.writer,
         }
     }
 
     /// Configures an ephemeral single-database in-memory backend.
-    pub fn in_memory(self) -> EventStoreBuilder<InMemoryBackend, MissingStrategy<()>> {
+    pub fn in_memory(self) -> EventStoreBuilder<InMemoryBackend, MissingStrategy<()>, W> {
         EventStoreBuilder {
             backend: InMemoryBackend,
             strategy: self.strategy,
+            writer: self.writer,
         }
     }
 
     pub fn sqld_default<R>(
         self,
         provisioner: R,
-    ) -> EventStoreBuilder<SqldDefaultBackend<R>, MissingStrategy<()>>
+    ) -> EventStoreBuilder<SqldDefaultBackend<R>, MissingStrategy<()>, W>
     where
         R: SqldDefaultProvisioner,
     {
         EventStoreBuilder {
             backend: SqldDefaultBackend { provisioner },
             strategy: MissingStrategy(PhantomData),
+            writer: self.writer,
         }
     }
 
@@ -636,193 +670,215 @@ impl EventStoreBuilder<MissingBackend, MissingStrategy<()>> {
     pub fn sqld_namespaced<R>(
         self,
         provisioner: R,
-    ) -> EventStoreBuilder<SqldNamespacedBackend<R>, MissingStrategy<()>>
+    ) -> EventStoreBuilder<SqldNamespacedBackend<R>, MissingStrategy<()>, W>
     where
         R: SqldNamespacedProvisioner,
     {
         EventStoreBuilder {
             backend: SqldNamespacedBackend { provisioner },
             strategy: MissingStrategy(PhantomData),
+            writer: self.writer,
         }
     }
 
-    pub fn turso<R>(self, provisioner: R) -> EventStoreBuilder<TursoBackend<R>, MissingStrategy<()>>
+    pub fn turso<R>(
+        self,
+        provisioner: R,
+    ) -> EventStoreBuilder<TursoBackend<R>, MissingStrategy<()>, W>
     where
         R: TursoProvisioner,
     {
         EventStoreBuilder {
             backend: TursoBackend { provisioner },
             strategy: MissingStrategy(PhantomData),
+            writer: self.writer,
         }
     }
 
-    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<MissingBackend, WithStrategy<S>>
+    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<MissingBackend, WithStrategy<S>, W>
     where
         S: PartitionStrategy,
     {
         EventStoreBuilder {
             backend: self.backend,
             strategy: WithStrategy(strategy),
+            writer: self.writer,
         }
     }
 }
 
-impl EventStoreBuilder<LocalBackend, MissingStrategy<()>> {
-    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<LocalBackend, WithStrategy<S>>
+impl<W> EventStoreBuilder<LocalBackend, MissingStrategy<()>, W> {
+    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<LocalBackend, WithStrategy<S>, W>
     where
         S: LocalPartitionStrategy,
     {
         EventStoreBuilder {
             backend: self.backend,
             strategy: WithStrategy(strategy),
+            writer: self.writer,
         }
     }
 }
 
-impl EventStoreBuilder<InMemoryBackend, MissingStrategy<()>> {
-    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<InMemoryBackend, WithStrategy<S>>
+impl<W> EventStoreBuilder<InMemoryBackend, MissingStrategy<()>, W> {
+    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<InMemoryBackend, WithStrategy<S>, W>
     where
         S: SingleTargetPartitionStrategy,
     {
         EventStoreBuilder {
             backend: self.backend,
             strategy: WithStrategy(strategy),
+            writer: self.writer,
         }
     }
 }
 
-impl<R> EventStoreBuilder<SqldDefaultBackend<R>, MissingStrategy<()>>
+impl<R, W> EventStoreBuilder<SqldDefaultBackend<R>, MissingStrategy<()>, W>
 where
     R: SqldDefaultProvisioner,
 {
     pub fn strategy<S>(
         self,
         strategy: S,
-    ) -> EventStoreBuilder<SqldDefaultBackend<R>, WithStrategy<S>>
+    ) -> EventStoreBuilder<SqldDefaultBackend<R>, WithStrategy<S>, W>
     where
         S: SingleTargetPartitionStrategy,
     {
         EventStoreBuilder {
             backend: self.backend,
             strategy: WithStrategy(strategy),
+            writer: self.writer,
         }
     }
 }
 
-impl<R> EventStoreBuilder<SqldNamespacedBackend<R>, MissingStrategy<()>>
+impl<R, W> EventStoreBuilder<SqldNamespacedBackend<R>, MissingStrategy<()>, W>
 where
     R: SqldNamespacedProvisioner,
 {
     pub fn strategy<S>(
         self,
         strategy: S,
-    ) -> EventStoreBuilder<SqldNamespacedBackend<R>, WithStrategy<S>>
+    ) -> EventStoreBuilder<SqldNamespacedBackend<R>, WithStrategy<S>, W>
     where
         S: SqldNamespacedPartitionStrategy + PartitionNamingStrategy,
     {
         EventStoreBuilder {
             backend: self.backend,
             strategy: WithStrategy(strategy),
+            writer: self.writer,
         }
     }
 }
 
-impl<R> EventStoreBuilder<TursoBackend<R>, MissingStrategy<()>>
+impl<R, W> EventStoreBuilder<TursoBackend<R>, MissingStrategy<()>, W>
 where
     R: TursoProvisioner,
 {
-    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<TursoBackend<R>, WithStrategy<S>>
+    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<TursoBackend<R>, WithStrategy<S>, W>
     where
         S: PartitionNamingStrategy,
     {
         EventStoreBuilder {
             backend: self.backend,
             strategy: WithStrategy(strategy),
+            writer: self.writer,
         }
     }
 }
 
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
+impl<S, W> EventStoreBuilder<MissingBackend, WithStrategy<S>, W>
 where
     S: SingleTargetPartitionStrategy,
 {
-    pub fn in_memory(self) -> EventStoreBuilder<InMemoryBackend, WithStrategy<S>> {
+    pub fn in_memory(self) -> EventStoreBuilder<InMemoryBackend, WithStrategy<S>, W> {
         EventStoreBuilder {
             backend: InMemoryBackend,
             strategy: self.strategy,
+            writer: self.writer,
         }
     }
 }
 
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
+impl<S, W> EventStoreBuilder<MissingBackend, WithStrategy<S>, W>
 where
     S: LocalPartitionStrategy,
 {
-    pub fn local(self, path: impl AsRef<Path>) -> EventStoreBuilder<LocalBackend, WithStrategy<S>> {
+    pub fn local(
+        self,
+        path: impl AsRef<Path>,
+    ) -> EventStoreBuilder<LocalBackend, WithStrategy<S>, W> {
         EventStoreBuilder {
             backend: LocalBackend {
                 path: path.as_ref().to_path_buf(),
             },
             strategy: self.strategy,
+            writer: self.writer,
         }
     }
 }
 
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
+impl<S, W> EventStoreBuilder<MissingBackend, WithStrategy<S>, W>
 where
     S: SingleTargetPartitionStrategy,
 {
     pub fn sqld_default(
         self,
         provisioner: impl SqldDefaultProvisioner,
-    ) -> EventStoreBuilder<SqldDefaultBackend<impl SqldDefaultProvisioner>, WithStrategy<S>> {
+    ) -> EventStoreBuilder<SqldDefaultBackend<impl SqldDefaultProvisioner>, WithStrategy<S>, W>
+    {
         EventStoreBuilder {
             backend: SqldDefaultBackend { provisioner },
             strategy: self.strategy,
+            writer: self.writer,
         }
     }
 }
 
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
+impl<S, W> EventStoreBuilder<MissingBackend, WithStrategy<S>, W>
 where
     S: PartitionNamingStrategy,
 {
     pub fn turso(
         self,
         provisioner: impl TursoProvisioner,
-    ) -> EventStoreBuilder<TursoBackend<impl TursoProvisioner>, WithStrategy<S>> {
+    ) -> EventStoreBuilder<TursoBackend<impl TursoProvisioner>, WithStrategy<S>, W> {
         EventStoreBuilder {
             backend: TursoBackend { provisioner },
             strategy: self.strategy,
+            writer: self.writer,
         }
     }
 }
 
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
+impl<S, W> EventStoreBuilder<MissingBackend, WithStrategy<S>, W>
 where
     S: SqldNamespacedPartitionStrategy + PartitionNamingStrategy,
 {
     pub fn sqld_namespaced(
         self,
         provisioner: impl SqldNamespacedProvisioner,
-    ) -> EventStoreBuilder<SqldNamespacedBackend<impl SqldNamespacedProvisioner>, WithStrategy<S>>
+    ) -> EventStoreBuilder<SqldNamespacedBackend<impl SqldNamespacedProvisioner>, WithStrategy<S>, W>
     {
         EventStoreBuilder {
             backend: SqldNamespacedBackend { provisioner },
             strategy: self.strategy,
+            writer: self.writer,
         }
     }
 }
 
-impl<B, S> EventStoreBuilder<B, WithStrategy<S>>
+impl<B, S, W> EventStoreBuilder<B, WithStrategy<S>, WithWriter<W>>
 where
     S: PartitionStrategy,
     B: BackendBinding<S>,
+    W: wee_events::EventEncoder,
 {
-    pub async fn open(self) -> Result<EventStore<S, B::Catalog>, Error> {
+    pub async fn open(self) -> Result<EventStore<S, B::Catalog, W>, Error> {
         let store = EventStore::from_catalog(
             self.strategy.0.clone(),
             self.backend.into_catalog(&self.strategy.0)?,
+            self.writer.0,
         );
 
         for partition in store.strategy.bootstrap_partitions() {
@@ -833,10 +889,24 @@ where
     }
 }
 
-impl<S, C> EventStoreApi for EventStore<S, C>
+impl<S, C, W> wee_events::EncodesEvents for EventStore<S, C, W>
 where
     S: PartitionStrategy,
     C: PartitionCatalog<S::Partition>,
+    W: wee_events::EventEncoder + Send + Sync,
+{
+    type Encoder = W;
+
+    fn event_encoder(&self) -> &Self::Encoder {
+        &self.writer
+    }
+}
+
+impl<S, C, W> EventStoreApi for EventStore<S, C, W>
+where
+    S: PartitionStrategy,
+    C: PartitionCatalog<S::Partition>,
+    W: wee_events::EventEncoder + Send + Sync + 'static,
 {
     type Error = Error;
 

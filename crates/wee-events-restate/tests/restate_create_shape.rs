@@ -69,6 +69,16 @@ impl EventStore for FixedStore {
     }
 }
 
+static JSON_ENCODER: wee_events::JsonEncoder = wee_events::JsonEncoder;
+
+impl wee_events::EncodesEvents for FixedStore {
+    type Encoder = wee_events::JsonEncoder;
+
+    fn event_encoder(&self) -> &Self::Encoder {
+        &JSON_ENCODER
+    }
+}
+
 #[wee_events::capability]
 pub trait Randomizer {
     async fn amount(&self, min: i64, max: i64) -> wee_events::Result<i64>;

@@ -323,6 +323,7 @@ where
         store: SqliteEventStore::builder()
             .in_memory()
             .strategy(strategy)
+            .writer(wee_events::JsonEncoder)
             .open()
             .await
             .unwrap(),
@@ -337,6 +338,7 @@ where
     let store = SqliteEventStore::builder()
         .local(S::local_store_path(temp_dir.as_ref()))
         .strategy(strategy)
+        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
@@ -360,12 +362,14 @@ where
     let store_a = SqliteEventStore::builder()
         .local(&path)
         .strategy(strategy.clone())
+        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
     let store_b = SqliteEventStore::builder()
         .local(&path)
         .strategy(strategy)
+        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
@@ -502,6 +506,7 @@ where
     let store = SqliteEventStore::builder()
         .turso(FixedRemoteTargetProvisioner { url, auth_token })
         .strategy(strategy)
+        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
@@ -528,12 +533,14 @@ where
     let store_a = SqliteEventStore::builder()
         .turso(provisioner.clone())
         .strategy(strategy.clone())
+        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
     let store_b = SqliteEventStore::builder()
         .turso(provisioner)
         .strategy(strategy)
+        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
@@ -560,6 +567,7 @@ async fn open_sqld_default_store_with_retry(
         match SqliteEventStore::builder()
             .sqld_default(provisioner.clone())
             .strategy(strategy)
+            .writer(wee_events::JsonEncoder)
             .open()
             .await
         {
@@ -587,6 +595,7 @@ where
         match SqliteEventStore::builder()
             .sqld_namespaced(provisioner.clone())
             .strategy(strategy.clone())
+            .writer(wee_events::JsonEncoder)
             .open()
             .await
         {
@@ -1010,6 +1019,7 @@ mod turso_platform_integration {
                     let store = SqliteEventStore::builder()
                         .turso(TursoPlatformProvisioner::new(config.clone()))
                         .strategy($strategy)
+                        .writer(wee_events::JsonEncoder)
                         .open()
                         .await
                         .unwrap();
@@ -1032,12 +1042,14 @@ mod turso_platform_integration {
                     let store_a = SqliteEventStore::builder()
                         .turso(TursoPlatformProvisioner::new(config.clone()))
                         .strategy($strategy)
+                        .writer(wee_events::JsonEncoder)
                         .open()
                         .await
                         .unwrap();
                     let store_b = SqliteEventStore::builder()
                         .turso(TursoPlatformProvisioner::new(config.clone()))
                         .strategy($strategy)
+                        .writer(wee_events::JsonEncoder)
                         .open()
                         .await
                         .unwrap();

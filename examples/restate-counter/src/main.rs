@@ -21,6 +21,7 @@ async fn main() {
         SqliteEventStore::builder()
             .local("counter-events.db")
             .strategy(GlobalStrategy)
+            .writer(wee_events::JsonEncoder)
             .open()
             .await
             .expect("event store should open"),
