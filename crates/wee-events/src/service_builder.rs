@@ -26,8 +26,19 @@
 //!
 //! ## Handler signature
 //!
-//! ```ignore
-//! async fn my_handler(ctx: &Ctx, entity: &Entity<S>, cmd: C) -> Result<(), EH>
+//! ```rust,no_run
+//! # use wee_events::{Entity, Result};
+//! # struct Ctx;
+//! # struct State;
+//! # struct Command;
+//! async fn my_handler(
+//!     ctx: &Ctx,
+//!     entity: &Entity<State>,
+//!     cmd: Command,
+//! ) -> Result<()> {
+//!     # let _ = (ctx, entity, cmd);
+//!     # Ok(())
+//! }
 //! ```
 
 use std::future::Future;

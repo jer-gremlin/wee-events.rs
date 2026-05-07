@@ -21,7 +21,7 @@ pub fn capability(args: TokenStream, input: TokenStream) -> TokenStream {
 ///
 /// # Syntax
 ///
-/// ```rust,ignore
+/// ```text
 /// #[wee_events::handler(command = MyCommand, requires(HasSomeTrait))]
 /// pub async fn my_handler<R: HasSomeTrait>(
 ///     env: &R,
@@ -43,7 +43,7 @@ pub fn handler(args: TokenStream, input: TokenStream) -> TokenStream {
 ///
 /// # Syntax
 ///
-/// ```rust,ignore
+/// ```text
 /// #[wee_events::loader(requires(HasStore))]
 /// pub async fn load_my_state<R: HasStore>(
 ///     env: &R,
@@ -233,7 +233,7 @@ fn extract_prefix(input: &DeriveInput, attr_name: &str) -> syn::Result<String> {
 ///
 /// # Syntax
 ///
-/// ```rust,ignore
+/// ```text
 /// wee_events::service! {
 ///     pub CounterService for Counter {
 ///         loader: load_counter,
