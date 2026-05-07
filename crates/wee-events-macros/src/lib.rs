@@ -248,11 +248,11 @@ fn extract_prefix(input: &DeriveInput, attr_name: &str) -> syn::Result<String> {
 ///   any type satisfying the constituent traits satisfies this trait via
 ///   a blanket impl
 /// - `pub struct CounterService` — service namespace (zero-size)
-/// - `CounterService::portable(factory)` — builds a portable in-process
-///   service parameterised over an environment `R: CounterServiceEnv`
-/// - `impl DispatchCommand<C>` + `impl Handles<C>` on `BuiltService` for
-///   each registered command
-/// - `impl TypedService<Counter>` on `BuiltService`
+/// - `wee_events::create(CounterService).with_store(store).with_env(services).build()`
+///   — builds a typed in-process service
+/// - `impl DispatchCommand<C>` + `impl Handles<C>` on the generated in-process
+///   service for each registered command
+/// - Restate registration helpers when used with `wee-events-restate`
 #[proc_macro]
 pub fn service(input: TokenStream) -> TokenStream {
     service_macro::expand(input)

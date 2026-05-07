@@ -4,16 +4,16 @@ use restate_sdk::prelude::*;
 use wee_events::{AggregateId, Command, Entity, Revision};
 
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
-struct Counter;
+pub struct Counter;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct Inc;
+pub struct Inc;
 impl Command for Inc {
     const NAME: &'static str = "counter:inc";
 }
 
 #[wee_events::loader]
-async fn load<R: Send + Sync + 'static>(
+pub async fn load<R: Send + Sync + 'static>(
     _env: &R,
     id: &AggregateId,
 ) -> wee_events::Result<Entity<Counter>> {
@@ -25,7 +25,7 @@ async fn load<R: Send + Sync + 'static>(
 }
 
 #[wee_events::handler(command = Inc)]
-async fn inc<R: Send + Sync + 'static>(
+pub async fn inc<R: Send + Sync + 'static>(
     _env: &R,
     entity: &Entity<Counter>,
     _cmd: Inc,

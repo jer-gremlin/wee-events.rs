@@ -7,6 +7,5 @@ fn ui() {
     t.compile_fail("tests/ui/service_macro_rejects_any_effect_filter.rs");
     t.compile_fail("tests/ui/service_macro_rejects_trailing_fields.rs");
     t.compile_fail("tests/ui/service_macro_rejects_malformed_predicate.rs");
-    t.compile_fail("tests/ui/portable_rejects_durable_capability.rs");
     t.pass("tests/ui/definition_only_compiles.rs");
 }

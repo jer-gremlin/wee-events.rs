@@ -34,6 +34,8 @@ type SharedConnection = Arc<AsyncMutex<Connection>>;
 const MAX_AUTO_RETRIES: usize = 5;
 const BASE_RETRY_DELAY_MS: u64 = 2;
 const MAX_RETRY_DELAY_MS: u64 = 64;
+const LAZY_CREATE_PARTITION_READY_ATTEMPTS: usize = 30;
+const LAZY_CREATE_PARTITION_READY_DELAY_MS: u64 = 1_000;
 
 /// SQLite-compatible event store backed by libSQL.
 ///
@@ -451,10 +453,30 @@ where
     ) -> Result<ChangeSet, Error> {
         let partition = self.strategy.partition_for_aggregate(aggregate_id)?;
         self.remember_partition(&partition).await;
-        let conn = self.ensure_partition_open(&partition).await?;
-        let conn = conn.lock().await;
-        self.publish_with_connection(&conn, aggregate_id, options, events)
-            .await
+
+        for attempt in 0..LAZY_CREATE_PARTITION_READY_ATTEMPTS {
+            let result = async {
+                let conn = self.ensure_partition_open(&partition).await?;
+                let conn = conn.lock().await;
+                self.publish_with_connection(&conn, aggregate_id, options.clone(), events.clone())
+                    .await
+            }
+            .await;
+
+            match result {
+                Ok(changeset) => return Ok(changeset),
+                Err(error)
+                    if is_lazy_create_partition_not_ready(&error)
+                        && attempt + 1 < LAZY_CREATE_PARTITION_READY_ATTEMPTS =>
+                {
+                    self.connections.lock().await.remove(&partition);
+                    sleep(lazy_create_partition_ready_delay()).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        unreachable!("lazy create retry loop always returns on the last attempt")
     }
 
     async fn try_publish_once(
@@ -565,6 +587,22 @@ fn retry_delay(attempt: usize) -> Duration {
     };
 
     Duration::from_millis(backoff_ms + jitter_ms)
+}
+
+fn lazy_create_partition_ready_delay() -> Duration {
+    Duration::from_millis(LAZY_CREATE_PARTITION_READY_DELAY_MS)
+}
+
+fn is_lazy_create_partition_not_ready(error: &Error) -> bool {
+    match error {
+        Error::Libsql(error) => is_lazy_create_partition_not_ready_message(&error.to_string()),
+        _ => false,
+    }
+}
+
+fn is_lazy_create_partition_not_ready_message(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("namespace") && message.contains("doesn't exist")
 }
 
 fn possible_clock_skew_ms(attempted: &Revision, actual: &Revision) -> Option<u64> {
@@ -1036,9 +1074,26 @@ async fn execute_publish_statement(
 
 #[cfg(test)]
 mod tests {
-    use super::possible_clock_skew_ms;
+    use super::{is_lazy_create_partition_not_ready_message, possible_clock_skew_ms};
     use ulid::Ulid;
     use wee_events::Revision;
+
+    #[test]
+    fn partition_not_ready_detector_matches_turso_namespace_404() {
+        let message = r#"Hrana(Api("status=404 Not Found, body={\"error\":\"Namespace `01HXQG8N7R1RJ2XJ8SQ7K6A8SP` doesn't exist\"}"))"#;
+
+        assert!(is_lazy_create_partition_not_ready_message(message));
+    }
+
+    #[test]
+    fn partition_not_ready_detector_ignores_unrelated_errors() {
+        assert!(!is_lazy_create_partition_not_ready_message(
+            "database is locked"
+        ));
+        assert!(!is_lazy_create_partition_not_ready_message(
+            "revision conflict"
+        ));
+    }
 
     #[test]
     fn possible_clock_skew_reports_positive_timestamp_gap() {

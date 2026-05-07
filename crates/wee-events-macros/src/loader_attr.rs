@@ -158,6 +158,62 @@ fn extract_state_type(return_type: &ReturnType) -> syn::Result<Type> {
     Ok(state_ty)
 }
 
+fn extract_error_type(return_type: &ReturnType) -> syn::Result<Type> {
+    let ReturnType::Type(_, box_ty) = return_type else {
+        return Err(Error::new(
+            proc_macro2::Span::call_site(),
+            "loader must return `Result<Entity<State>, Error>` or `wee_events::Result<Entity<State>>`",
+        ));
+    };
+
+    let Type::Path(type_path) = box_ty.as_ref() else {
+        return Err(Error::new_spanned(
+            box_ty.as_ref(),
+            "loader must return `Result<Entity<State>, Error>` or `wee_events::Result<Entity<State>>`",
+        ));
+    };
+
+    let last_seg = type_path.path.segments.last().ok_or_else(|| {
+        Error::new_spanned(
+            box_ty.as_ref(),
+            "loader must return `Result<Entity<State>, Error>` or `wee_events::Result<Entity<State>>`",
+        )
+    })?;
+
+    if last_seg.ident != "Result" {
+        return Err(Error::new_spanned(
+            box_ty.as_ref(),
+            "loader must return `Result<Entity<State>, Error>` or `wee_events::Result<Entity<State>>`",
+        ));
+    }
+
+    let PathArguments::AngleBracketed(result_args) = &last_seg.arguments else {
+        return Err(Error::new_spanned(
+            box_ty.as_ref(),
+            "loader must return `Result<Entity<State>, Error>` or `wee_events::Result<Entity<State>>`",
+        ));
+    };
+
+    let mut type_args = result_args.args.iter().filter_map(|arg| {
+        if let GenericArgument::Type(ty) = arg {
+            Some(ty.clone())
+        } else {
+            None
+        }
+    });
+
+    let _ok = type_args.next().ok_or_else(|| {
+        Error::new_spanned(
+            box_ty.as_ref(),
+            "loader must return `Result<Entity<State>, Error>` or `wee_events::Result<Entity<State>>`",
+        )
+    })?;
+
+    Ok(type_args
+        .next()
+        .unwrap_or_else(|| syn::parse_quote!(wee_events::Error)))
+}
+
 // ---------------------------------------------------------------------------
 // Macro expansion
 // ---------------------------------------------------------------------------
@@ -182,10 +238,21 @@ fn expand_inner(args: LoaderArgs, func: ItemFn) -> syn::Result<TokenStream2> {
     }
 
     let state_ty = extract_state_type(&func.sig.output)?;
+    let error_ty = extract_error_type(&func.sig.output)?;
+    let ctx_ident = func
+        .sig
+        .generics
+        .type_params()
+        .next()
+        .expect("validated above")
+        .ident
+        .clone();
 
     let fn_name = &func.sig.ident;
     let vis = &func.vis;
     let requires = &args.requires;
+    let generics = &func.sig.generics;
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
 
     // Spec struct name: {fn_name}_Spec
     let spec_name = syn::Ident::new(&format!("{}_Spec", fn_name), fn_name.span());
@@ -218,6 +285,32 @@ fn expand_inner(args: LoaderArgs, func: ItemFn) -> syn::Result<TokenStream2> {
 
         impl wee_events::LoaderSpec for #spec_name {
             type State = #state_ty;
+        }
+
+        impl #impl_generics wee_events::LoaderRuntimeSpec<#ctx_ident> for #spec_name #where_clause {
+            type Error = #error_ty;
+
+            fn load<'a>(
+                env: &'a #ctx_ident,
+                id: &'a wee_events::AggregateId,
+            ) -> ::std::pin::Pin<
+                ::std::boxed::Box<
+                    dyn ::std::future::Future<
+                            Output = ::std::result::Result<
+                                wee_events::Entity<Self::State>,
+                                Self::Error,
+                            >,
+                        > + ::std::marker::Send
+                        + 'a,
+                >,
+            >
+            where
+                #ctx_ident: 'a,
+                Self::State: 'a,
+                Self::Error: 'a,
+            {
+                ::std::boxed::Box::pin(#fn_name::<#ctx_ident>(env, id))
+            }
         }
 
         #[allow(non_camel_case_types)]

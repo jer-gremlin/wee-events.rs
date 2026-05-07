@@ -13,13 +13,13 @@ pub struct Counter {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct Inc;
+pub struct Inc;
 impl Command for Inc {
     const NAME: &'static str = "counter:increment";
 }
 
 #[wee_events::loader]
-async fn load<R: Send + Sync + 'static>(
+pub async fn load<R: Send + Sync + 'static>(
     _env: &R,
     id: &AggregateId,
 ) -> wee_events::Result<Entity<Counter>> {
@@ -31,7 +31,7 @@ async fn load<R: Send + Sync + 'static>(
 }
 
 #[wee_events::handler(command = Inc)]
-async fn inc<R: Send + Sync + 'static>(
+pub async fn inc<R: Send + Sync + 'static>(
     _env: &R,
     e: &Entity<Counter>,
     _cmd: Inc,
@@ -62,13 +62,13 @@ fn registration_can_be_attached() {
 pub struct WeirdCounter;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct WeirdInc;
+pub struct WeirdInc;
 impl Command for WeirdInc {
     const NAME: &'static str = "weird:increment";
 }
 
 #[wee_events::loader]
-async fn weird_load<R: Send + Sync + 'static>(
+pub async fn weird_load<R: Send + Sync + 'static>(
     _env: &R,
     id: &AggregateId,
 ) -> wee_events::Result<Entity<WeirdCounter>> {
@@ -80,7 +80,7 @@ async fn weird_load<R: Send + Sync + 'static>(
 }
 
 #[wee_events::handler(command = WeirdInc)]
-async fn weird_inc<R: Send + Sync + 'static>(
+pub async fn weird_inc<R: Send + Sync + 'static>(
     _env: &R,
     e: &Entity<WeirdCounter>,
     _cmd: WeirdInc,

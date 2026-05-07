@@ -11,13 +11,13 @@ use wee_events::{AggregateId, Command, Entity, Revision};
 pub struct Counter;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct Inc;
+pub struct Inc;
 impl Command for Inc {
     const NAME: &'static str = "counter:increment";
 }
 
 #[restate_sdk::workflow]
-trait Notifier {
+pub trait Notifier {
     async fn run(
         notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
     ) -> Result<(), restate_sdk::errors::HandlerError>;
@@ -35,7 +35,7 @@ impl Notifier for NotifierImpl {
 }
 
 #[wee_events::loader]
-async fn load<R: Send + Sync + 'static>(
+pub async fn load<R: Send + Sync + 'static>(
     _env: &R,
     id: &AggregateId,
 ) -> wee_events::Result<Entity<Counter>> {
@@ -47,7 +47,7 @@ async fn load<R: Send + Sync + 'static>(
 }
 
 #[wee_events::handler(command = Inc)]
-async fn inc<R: Send + Sync + 'static>(
+pub async fn inc<R: Send + Sync + 'static>(
     _env: &R,
     e: &Entity<Counter>,
     _cmd: Inc,
