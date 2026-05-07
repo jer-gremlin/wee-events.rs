@@ -46,21 +46,31 @@ impl Rejection {
 ///
 /// `Rejection` is a domain-level refusal from a command handler.
 /// `Store(E)` is a backend failure from the underlying store.
-/// `Codec(EncodeError)` is a serialization failure at the service boundary.
+/// `Codec(CodecError)` is a serialization or deserialization failure at the
+/// service boundary, covering both encode and decode directions.
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError<E: std::error::Error + Send + Sync + 'static> {
     #[error(transparent)]
     Rejection(#[from] Rejection),
     #[error(transparent)]
     Store(E),
-    #[error("serialization error: {0}")]
-    Codec(#[from] crate::EncodeError),
+    #[error(transparent)]
+    Codec(#[from] crate::CodecError),
+}
+
+impl<E> From<crate::EncodeError> for ServiceError<E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: crate::EncodeError) -> Self {
+        ServiceError::Codec(err.into())
+    }
 }
 
 /// Lift a [`DeserializeJsonError`] into a [`ServiceError`]: encoding-mismatch
 /// is a structural store-contract failure (routed through `Store(E)` via the
 /// store error's `From<crate::Error>` impl), and a decode failure is a codec
-/// failure (routed through `Codec`).
+/// failure (routed through `Codec` as a `DecodeError::Json`).
 impl<E> From<DeserializeJsonError> for ServiceError<E>
 where
     E: From<crate::Error> + std::error::Error + Send + Sync + 'static,
@@ -71,10 +81,7 @@ where
                 ServiceError::Store(E::from(crate::Error::EncodingMismatch { expected, actual }))
             }
             DeserializeJsonError::Decode(e) => {
-                ServiceError::Store(E::from(crate::Error::EncodingMismatch {
-                    expected: crate::EventData::JSON_ENCODING.to_string(),
-                    actual: format!("invalid JSON: {e}"),
-                }))
+                ServiceError::Codec(crate::CodecError::Decode(crate::DecodeError::Json(e)))
             }
         }
     }

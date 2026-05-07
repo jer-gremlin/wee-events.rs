@@ -22,8 +22,8 @@ mod test_suite;
 
 pub use aggregate::Aggregate;
 pub use codec::{
-    CborDecoder, CborEncoder, DecodeError, DecoderList, EncodeError, EncodesEvents, EventDecoder,
-    EventDecoders, EventEncoder, JsonDecoder, JsonEncoder,
+    CborDecoder, CborEncoder, CodecError, DecodeError, DecoderList, EncodeError, EncodesEvents,
+    EventDecoder, EventDecoders, EventEncoder, JsonDecoder, JsonEncoder,
 };
 pub use command::Command;
 pub use dispatcher::Dispatcher;

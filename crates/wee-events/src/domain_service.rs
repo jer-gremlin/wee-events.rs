@@ -47,12 +47,9 @@ where
 
     async fn load(&self, id: &AggregateId) -> Result<Entity<S>, Store::Error> {
         let aggregate = self.store.load(id).await?;
-        self.renderer.render(&aggregate).map_err(|e| match e {
-            DeserializeJsonError::EncodingMismatch { expected, actual } => {
-                Store::Error::from(crate::Error::EncodingMismatch { expected, actual })
-            }
-            DeserializeJsonError::Decode(e) => Store::Error::from(e),
-        })
+        self.renderer
+            .render(&aggregate)
+            .map_err(DeserializeJsonError::into_store_error)
     }
 }
 

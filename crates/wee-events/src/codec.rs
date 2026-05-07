@@ -55,6 +55,18 @@ pub enum DecodeError {
     Cbor(#[from] ciborium::de::Error<std::io::Error>),
 }
 
+/// Unified codec failure covering both encode and decode directions.
+///
+/// Used at boundaries where a single error type needs to carry either kind
+/// of codec failure (e.g. `ServiceError::Codec`).
+#[derive(Debug, thiserror::Error)]
+pub enum CodecError {
+    #[error(transparent)]
+    Encode(#[from] EncodeError),
+    #[error(transparent)]
+    Decode(#[from] DecodeError),
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct JsonEncoder;
 

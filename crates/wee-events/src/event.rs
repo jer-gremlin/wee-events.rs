@@ -32,6 +32,24 @@ pub enum DeserializeJsonError {
     Decode(#[from] serde_json::Error),
 }
 
+impl DeserializeJsonError {
+    /// Project this error into any store error type. `EncodingMismatch`
+    /// becomes a structural [`crate::Error::EncodingMismatch`]; `Decode`
+    /// becomes a raw [`serde_json::Error`]. Useful for [`crate::Renderer`]
+    /// callers whose return type is the store's associated `Error`.
+    pub fn into_store_error<E>(self) -> E
+    where
+        E: From<crate::Error> + From<serde_json::Error>,
+    {
+        match self {
+            Self::EncodingMismatch { expected, actual } => {
+                crate::Error::EncodingMismatch { expected, actual }.into()
+            }
+            Self::Decode(e) => e.into(),
+        }
+    }
+}
+
 impl EventData {
     /// The encoding identifier for JSON payloads.
     pub const JSON_ENCODING: &'static str = "application/json";

@@ -3,14 +3,13 @@ mod events;
 mod randomiser;
 mod services;
 mod state;
-mod system_randomiser;
 
 use std::sync::Arc;
 
+use randomiser::system::SystemRandomiser;
 use restate_sdk::prelude::*;
 use services::audit_log::{AuditLog, AuditLogImpl};
 use services::counter::{CounterService, CounterServiceBinder};
-use system_randomiser::SystemRandomiser;
 use wee_events_sqlite::{GlobalStrategy, SqliteEventStore};
 
 #[tokio::main]
