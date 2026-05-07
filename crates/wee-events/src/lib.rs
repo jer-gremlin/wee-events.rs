@@ -1,11 +1,11 @@
 mod aggregate;
 mod codec;
 mod command;
-mod dispatcher;
-mod domain_service;
+mod create;
 mod entity;
 mod error;
 mod event;
+mod handler_env;
 mod id;
 mod memory_store;
 mod publisher;
@@ -26,13 +26,16 @@ pub use codec::{
     EventDecoder, EventDecoders, EventEncoder, JsonDecoder, JsonEncoder,
 };
 pub use command::Command;
-pub use dispatcher::Dispatcher;
-pub use domain_service::DomainService;
+pub use create::{
+    create, InProcessServiceDefinition, ServiceCreateBuilder, ServiceCreateEnvBuilder,
+    ServiceCreateStoreBuilder,
+};
 pub use entity::Entity;
 pub use error::{Error, EventStoreErrorExt, RetryDiagnostics};
 pub use event::{
     ChangeSet, DeserializeJsonError, DomainEvent, EventData, EventMetadata, RecordedEvent,
 };
+pub use handler_env::HandlerEnv;
 pub use id::{
     AggregateId, AggregateIdParseError, AggregateType, CommandName, CorrelationId, EventId,
     EventType, Revision,
@@ -41,10 +44,7 @@ pub use publisher::{HasPublisher, Publisher};
 pub use renderer::{ReduceFn, Renderer};
 #[doc(hidden)]
 pub use service::__private;
-pub use service::{
-    CommandExecutor, EntityLoader, Handles, HasCommand, Rejection, Service, ServiceDefinition,
-    ServiceError, TypedService,
-};
+pub use service::{Handles, HasCommand, Rejection, ServiceDefinition, ServiceError, TypedService};
 pub use service_builder::{BuiltService, ServiceBuilder};
 #[doc(hidden)]
 pub use service_builder::{EmptyHandlers, Here, There};
@@ -52,7 +52,7 @@ pub use service_builder::{EmptyHandlers, Here, There};
 pub use service_builder::{FactoryBridge, HandleCommand, HandlerBridge, HandlerList, LoaderBridge};
 #[doc(hidden)]
 pub use service_builder::{HandlerOutcome, IntoHandlerOutcome};
-pub use spec::{HandlerSpec, LoaderSpec};
+pub use spec::{HandlerRuntimeSpec, HandlerSpec, LoaderRuntimeSpec, LoaderSpec};
 pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{capability, handler, loader, service, Command, DomainEvent};
 

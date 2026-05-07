@@ -108,12 +108,12 @@ where
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-struct Counter {
+pub struct Counter {
     value: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Randomise {
+pub struct Randomise {
     min: i64,
     max: i64,
 }
@@ -124,17 +124,20 @@ impl Command for Randomise {
 
 #[derive(Debug, Clone, Serialize, Deserialize, DomainEvent)]
 #[domain_event(prefix = "counter")]
-enum CounterEvent {
+pub enum CounterEvent {
     Randomised { amount: i64 },
 }
 
 #[wee_events::loader(requires(CounterStore))]
-async fn load<R: CounterStore>(store: &R, id: &AggregateId) -> wee_events::Result<Entity<Counter>> {
+pub async fn load<R: CounterStore>(
+    store: &R,
+    id: &AggregateId,
+) -> wee_events::Result<Entity<Counter>> {
     store.load(id).await
 }
 
 #[wee_events::handler(command = Randomise, requires(wee_events::HasPublisher, Randomizer))]
-async fn randomise<R: wee_events::HasPublisher + Randomizer>(
+pub async fn randomise<R: wee_events::HasPublisher + Randomizer>(
     env: &R,
     entity: &Entity<Counter>,
     command: Randomise,

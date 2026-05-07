@@ -12,9 +12,8 @@ It is part of the `wee-events` family alongside the original
 
 - **Compact event-sourcing core**: aggregate, event, command, renderer, and store primitives.
 - **Typed services**: `TypedService<S>` exposes `load` and compile-time checked `execute` (via `Handles<C>` bounds).
-- **Portable and Restate-native macros**: `service!` and `restate_service!` declare services once and generate static dispatch.
-- **Command dispatcher**: typed handler registration with capability-trait context injection (Effect-TS `R` pattern).
-- **Domain service**: composes Dispatcher + Store + Renderer into a full `Service<S>` implementation.
+- **Core and Restate service macros**: `service!` declares services once and generates typed in-process and Restate dispatch.
+- **Capability-driven handlers**: handlers receive `HandlerEnv<Store, Services>` for store-backed publishing plus service dependencies.
 - **Structured rejections**: `Rejection` error type for domain/business logic failures, distinct from infrastructure errors.
 - **Typed identifiers**: dedicated types for aggregate IDs, event IDs, revisions, and names.
 - **Derive macros**: `Command` and `DomainEvent` derives generate consistent names from enums.
@@ -28,47 +27,31 @@ It is part of the `wee-events` family alongside the original
 Declare a service once, get compile-time checked `execute` for free:
 
 ```rust
-use wee_events_restate::restate_service;
-
-restate_service! {
-    pub CounterService for Counter {
-        handlers: [
-            Increment => increment,
-            Decrement => decrement,
-            Adjust    => adjust,
-        ],
-    }
-}
-
-// Generated client — calls Restate ingress over HTTP
-let client = CounterServiceClient::new("http://localhost:8080", "counter");
-let entity = client.execute(&id, Increment { amount: 5 }).await?;
-
-// Unregistered commands fail at compile time, not runtime
-// client.execute(&id, UnknownCmd); // ← won't compile
-```
-
-The same pattern works for portable (non-Restate) services via `service!`:
-
-```rust
 use wee_events::service;
 
 service! {
     pub CounterService for Counter {
         loader: load_counter,
         handlers: [
-            Increment => increment,
-            Adjust    => adjust,
+            increment,
+            adjust,
         ],
     }
 }
 
-let svc = CounterService::build(|| async { Ok(AppContext::new()) });
+let svc = wee_events::create(CounterService)
+    .with_store(store)
+    .with_env(services)
+    .build();
 let entity = svc.execute(&id, Increment { amount: 5 }).await?;
+
+// Unregistered commands fail at compile time, not runtime.
+// svc.execute(&id, UnknownCmd); // won't compile
 ```
 
-Both macros generate types implementing `TypedService<S>` + `Handles<C>`, so
-business logic can be written once and work with either backend:
+Generated in-process services and Restate clients implement `TypedService<S>` +
+`Handles<C>`, so business logic can be written once and work with either
+backend:
 
 ```rust
 async fn top_up<T>(svc: &T, id: &AggregateId) -> Result<Entity<Counter>>
@@ -81,9 +64,9 @@ where
 
 ## Crates
 
-- `crates/wee-events`: core types, traits (`EventStore`, `EntityLoader`, `CommandExecutor`, `Service`, `Dispatcher`, `DomainService`), renderer, and an in-memory store
+- `crates/wee-events`: core types, traits (`EventStore`, `TypedService`, `Handles`, `HandlerEnv`), renderer, and an in-memory store
 - `crates/wee-events-macros`: derive macros for `Command` and `DomainEvent`
-- `crates/wee-events-restate`: Restate SDK-based command executor with side-effect dispatch and HTTP client
+- `crates/wee-events-restate`: Restate SDK-based binding, side-effect dispatch, and HTTP client
 - `crates/wee-events-sqlite`: a libSQL-backed SQLite event store plus document and projection helpers
 
 ```text

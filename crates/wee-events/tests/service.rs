@@ -1,10 +1,8 @@
 use std::convert::Infallible;
 use std::future::Future;
 
-use serde_json::json;
 use wee_events::{
-    AggregateId, Command, CommandExecutor, CommandName, Entity, EntityLoader, Handles, Rejection,
-    Revision, Service, ServiceError, TypedService,
+    AggregateId, Command, Entity, Handles, Rejection, Revision, ServiceError, TypedService,
 };
 
 type TestError = ServiceError<Infallible>;
@@ -63,94 +61,6 @@ fn rejection_deserialize_without_context_defaults_to_empty_object() {
 #[derive(Debug, Default, Clone)]
 struct Counter {
     value: i64,
-}
-
-/// A test implementation that implements both traits.
-struct CounterService;
-
-impl EntityLoader<Counter> for CounterService {
-    type Error = TestError;
-
-    async fn load(&self, id: &AggregateId) -> Result<Entity<Counter>, Self::Error> {
-        Ok(Entity {
-            aggregate_id: id.clone(),
-            revision: Revision::zero(),
-            state: Counter { value: 0 },
-        })
-    }
-}
-
-impl CommandExecutor<Counter> for CounterService {
-    type Error = TestError;
-
-    async fn execute(
-        &self,
-        name: &CommandName,
-        target: &AggregateId,
-        command: serde_json::Value,
-    ) -> Result<Entity<Counter>, Self::Error> {
-        let amount = command["amount"].as_i64().unwrap_or(1);
-        match name.as_str() {
-            "increment" => Ok(Entity {
-                aggregate_id: target.clone(),
-                revision: Revision::zero(),
-                state: Counter { value: amount },
-            }),
-            _ => Err(Rejection::new("UNKNOWN_COMMAND", format!("unknown: {name}")).into()),
-        }
-    }
-}
-
-#[tokio::test]
-async fn entity_loader_loads_state() {
-    let svc = CounterService;
-    let id: AggregateId = "counter:test-1".parse().unwrap();
-    let entity = svc.load(&id).await.unwrap();
-    assert_eq!(entity.state.value, 0);
-}
-
-#[tokio::test]
-async fn command_executor_executes() {
-    let svc = CounterService;
-    let id: AggregateId = "counter:test-1".parse().unwrap();
-    let name = CommandName::from("increment");
-    let entity = svc.execute(&name, &id, json!({"amount": 5})).await.unwrap();
-    assert_eq!(entity.state.value, 5);
-}
-
-#[tokio::test]
-async fn command_executor_rejects_unknown() {
-    let svc = CounterService;
-    let id: AggregateId = "counter:test-1".parse().unwrap();
-    let name = CommandName::from("explode");
-    let err = svc.execute(&name, &id, json!({})).await.unwrap_err();
-    match err {
-        ServiceError::Rejection(r) => assert_eq!(r.code, "UNKNOWN_COMMAND"),
-        other => panic!("expected Rejection, got: {other}"),
-    }
-}
-
-/// Verify blanket `Service` impl works — a function accepting `impl Service<Counter>`
-/// can call both `load` and `execute`.
-async fn use_service<S>(svc: &S) -> Entity<Counter>
-where
-    S: Service<Counter>,
-    <S as EntityLoader<Counter>>::Error: std::fmt::Debug,
-    <S as CommandExecutor<Counter>>::Error: std::fmt::Debug,
-{
-    let id: AggregateId = "counter:svc-1".parse().unwrap();
-    let _ = svc.load(&id).await.unwrap();
-    let name = CommandName::from("increment");
-    svc.execute(&name, &id, json!({"amount": 10}))
-        .await
-        .unwrap()
-}
-
-#[tokio::test]
-async fn service_blanket_impl_works() {
-    let svc = CounterService;
-    let entity = use_service(&svc).await;
-    assert_eq!(entity.state.value, 10);
 }
 
 // ── Typed service tests ───────────────────────────────────────────────────────

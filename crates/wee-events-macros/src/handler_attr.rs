@@ -128,6 +128,62 @@ fn result_ok_type(return_type: &ReturnType) -> syn::Result<&Type> {
         })
 }
 
+fn result_error_type(return_type: &ReturnType) -> syn::Result<Type> {
+    let ReturnType::Type(_, box_ty) = return_type else {
+        return Err(Error::new(
+            proc_macro2::Span::call_site(),
+            "handler must return `Result<T, Error>` or `wee_events::Result<T>`",
+        ));
+    };
+
+    let Type::Path(type_path) = box_ty.as_ref() else {
+        return Err(Error::new_spanned(
+            box_ty.as_ref(),
+            "handler must return `Result<T, Error>` or `wee_events::Result<T>`",
+        ));
+    };
+
+    let last_seg = type_path.path.segments.last().ok_or_else(|| {
+        Error::new_spanned(
+            box_ty.as_ref(),
+            "handler must return `Result<T, Error>` or `wee_events::Result<T>`",
+        )
+    })?;
+
+    if last_seg.ident != "Result" {
+        return Err(Error::new_spanned(
+            box_ty.as_ref(),
+            "handler must return `Result<T, Error>` or `wee_events::Result<T>`",
+        ));
+    }
+
+    let PathArguments::AngleBracketed(result_args) = &last_seg.arguments else {
+        return Err(Error::new_spanned(
+            box_ty.as_ref(),
+            "handler must return `Result<T, Error>` or `wee_events::Result<T>`",
+        ));
+    };
+
+    let mut type_args = result_args.args.iter().filter_map(|arg| {
+        if let GenericArgument::Type(ty) = arg {
+            Some(ty.clone())
+        } else {
+            None
+        }
+    });
+
+    let _ok = type_args.next().ok_or_else(|| {
+        Error::new_spanned(
+            box_ty.as_ref(),
+            "handler must return `Result<T, Error>` or `wee_events::Result<T>`",
+        )
+    })?;
+
+    Ok(type_args
+        .next()
+        .unwrap_or_else(|| syn::parse_quote!(wee_events::Error)))
+}
+
 fn extract_state_from_entity_type(entity_ty: &Type) -> syn::Result<Type> {
     let Type::Path(entity_path) = entity_ty else {
         return Err(Error::new_spanned(entity_ty, "expected `Entity<State>`"));
@@ -223,11 +279,22 @@ fn expand_inner(args: HandlerArgs, func: ItemFn) -> syn::Result<TokenStream2> {
     }
 
     let state_ty = extract_state_type(&func)?;
+    let error_ty = result_error_type(&func.sig.output)?;
+    let ctx_ident = func
+        .sig
+        .generics
+        .type_params()
+        .next()
+        .expect("validated above")
+        .ident
+        .clone();
 
     let fn_name = &func.sig.ident;
     let vis = &func.vis;
     let command_path = &args.command;
     let requires = &args.requires;
+    let generics = &func.sig.generics;
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
 
     // Spec struct name: {fn_name}_Spec
     let spec_name = syn::Ident::new(&format!("{}_Spec", fn_name), fn_name.span());
@@ -261,6 +328,38 @@ fn expand_inner(args: HandlerArgs, func: ItemFn) -> syn::Result<TokenStream2> {
         impl wee_events::HandlerSpec for #spec_name {
             type Command = #command_path;
             type State = #state_ty;
+        }
+
+        impl #impl_generics wee_events::HandlerRuntimeSpec<#ctx_ident> for #spec_name #where_clause {
+            type Error = #error_ty;
+
+            fn handle<'a>(
+                env: &'a #ctx_ident,
+                entity: &'a wee_events::Entity<Self::State>,
+                command: Self::Command,
+            ) -> ::std::pin::Pin<
+                ::std::boxed::Box<
+                    dyn ::std::future::Future<
+                            Output = ::std::result::Result<
+                                wee_events::HandlerOutcome<Self::State>,
+                                Self::Error,
+                            >,
+                        > + ::std::marker::Send
+                        + 'a,
+                >,
+            >
+            where
+                #ctx_ident: 'a,
+                Self::State: 'a,
+                Self::Error: 'a,
+                Self::Command: 'a,
+            {
+                ::std::boxed::Box::pin(async move {
+                    wee_events::IntoHandlerOutcome::into_handler_outcome(
+                        #fn_name::<#ctx_ident>(env, entity, command).await,
+                    )
+                })
+            }
         }
 
         #[allow(non_camel_case_types)]

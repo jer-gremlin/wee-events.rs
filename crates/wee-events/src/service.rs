@@ -1,7 +1,7 @@
 use crate::command::Command;
 use crate::entity::Entity;
 use crate::event::DeserializeJsonError;
-use crate::id::{AggregateId, CommandName};
+use crate::id::AggregateId;
 
 /// A structured rejection from the domain layer. Indicates a command was
 /// refused by business logic (as opposed to an infrastructure failure).
@@ -99,48 +99,6 @@ where
     }
 }
 
-/// Loads projected entity state for an aggregate.
-///
-/// This is the "read" half of a service — given an aggregate ID, return
-/// the current projected state. Implementations typically load from an
-/// EventStore and render through a Renderer.
-#[allow(async_fn_in_trait)]
-pub trait EntityLoader<S>: Send + Sync {
-    type Error;
-
-    async fn load(&self, id: &AggregateId) -> Result<Entity<S>, Self::Error>;
-}
-
-/// Executes a named command against a target aggregate, returning the
-/// updated projected state.
-///
-/// Takes an untyped `serde_json::Value` payload — this is the
-/// service-boundary interface. Typed command dispatch (validation,
-/// deserialization into concrete command enums) happens inside
-/// implementations.
-///
-/// Implementations choose their own error type via `Self::Error`. Service-level
-/// implementations typically use `ServiceError<StoreError>` so callers can
-/// distinguish domain rejections from infrastructure and codec failures.
-#[allow(async_fn_in_trait)]
-pub trait CommandExecutor<S>: Send + Sync {
-    type Error;
-
-    async fn execute(
-        &self,
-        name: &CommandName,
-        target: &AggregateId,
-        command: serde_json::Value,
-    ) -> Result<Entity<S>, Self::Error>;
-}
-
-/// A service combines entity loading with command execution.
-///
-/// Blanket-implemented for any type that implements both `EntityLoader<S>`
-/// and `CommandExecutor<S>`.
-pub trait Service<S>: EntityLoader<S> + CommandExecutor<S> {}
-impl<S, T: EntityLoader<S> + CommandExecutor<S>> Service<S> for T {}
-
 /// Hidden implementation details used by generated code.
 #[doc(hidden)]
 pub mod __private {
@@ -188,10 +146,10 @@ pub trait Handles<C>: __private::DispatchCommand<C> {}
 
 /// A typed service contract combining state loading with type-safe command dispatch.
 ///
-/// Unlike `Service<S>` (which takes untyped JSON), `TypedService<S>` dispatches
-/// over concrete command types. The `Handles<C>` bound on `execute` ensures
-/// only registered commands can be dispatched — unregistered commands produce a
-/// compile error rather than a runtime rejection.
+/// `TypedService<S>` dispatches over concrete command types. The `Handles<C>`
+/// bound on `execute` ensures only registered commands can be dispatched —
+/// unregistered commands produce a compile error rather than a runtime
+/// rejection.
 ///
 /// The trait is transport-agnostic: no `Serialize`, `Deserialize`, or
 /// transport-specific bounds appear here. Serialization is an adapter concern
@@ -208,16 +166,9 @@ pub trait Handles<C>: __private::DispatchCommand<C> {}
 ///
 /// # Implementation note
 ///
-/// Two `TypedService` implementations exist in this crate today:
-///
-/// - `DomainService` uses `ServiceError<Store::Error>` for `execute`,
-///   surfacing rejections and codec failures distinctly.
-/// - `BuiltService` (from the `service!` macro) carries two error generics
-///   (`EL` for the loader, `EH` for handlers) so handlers can return a
-///   richer service error such as `ServiceError<Store::Error>` directly,
-///   while the loader retains its own error. The macro emits a
-///   `TypedService::Error` equal to `EL` and per-command
-///   `DispatchCommand::Error` equal to `EH`.
+/// The `service!` macro emits typed in-process implementations via
+/// `wee_events::create(Service).with_store(store).with_env(services).build()`
+/// and Restate bindings through `wee-events-restate`.
 pub trait TypedService<S>: __private::ServiceState<State = S> + Send + Sync {
     type Error;
 

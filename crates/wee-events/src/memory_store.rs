@@ -42,6 +42,7 @@ impl From<serde_json::Error> for MemoryStoreError {
 ///
 /// Uses a monotonic ULID generator — guarantees strictly increasing
 /// revisions even within the same millisecond.
+#[derive(Clone)]
 pub struct MemoryStore {
     backing: Arc<MemoryStoreBacking>,
 }

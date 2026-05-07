@@ -19,7 +19,7 @@ pub struct Counter {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct Increment {
+pub struct Increment {
     amount: i64,
 }
 
@@ -28,14 +28,14 @@ impl Command for Increment {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct Adjust;
+pub struct Adjust;
 
 impl Command for Adjust {
     const NAME: &'static str = "counter:adjust";
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct Touch;
+pub struct Touch;
 
 impl Command for Touch {
     const NAME: &'static str = "counter:touch";
@@ -45,11 +45,11 @@ impl Command for Touch {
 // Capability traits
 // ---------------------------------------------------------------------------
 
-trait HasStore: Send + Sync + 'static {
+pub trait HasStore: Send + Sync + 'static {
     fn store_info(&self) -> &str;
 }
 
-trait HasRandomSource: Send + Sync + 'static {
+pub trait HasRandomSource: Send + Sync + 'static {
     fn random_bonus(&self) -> i64;
 }
 
@@ -58,7 +58,7 @@ trait HasRandomSource: Send + Sync + 'static {
 // ---------------------------------------------------------------------------
 
 #[wee_events::loader(requires(HasStore))]
-async fn load_counter<R: HasStore>(
+pub async fn load_counter<R: HasStore>(
     _env: &R,
     id: &AggregateId,
 ) -> wee_events::Result<Entity<Counter>> {
@@ -70,7 +70,7 @@ async fn load_counter<R: HasStore>(
 }
 
 #[wee_events::handler(command = Increment, requires(HasRandomSource))]
-async fn increment<R: HasRandomSource>(
+pub async fn increment<R: HasRandomSource>(
     env: &R,
     entity: &Entity<Counter>,
     cmd: Increment,
@@ -85,7 +85,7 @@ async fn increment<R: HasRandomSource>(
 }
 
 #[wee_events::handler(command = Adjust, requires(HasRandomSource))]
-async fn adjust<R: HasRandomSource>(
+pub async fn adjust<R: HasRandomSource>(
     _env: &R,
     entity: &Entity<Counter>,
     _cmd: Adjust,
@@ -94,7 +94,7 @@ async fn adjust<R: HasRandomSource>(
 }
 
 #[wee_events::handler(command = Touch)]
-async fn touch<R: Send + Sync>(
+pub async fn touch<R: Send + Sync>(
     _env: &R,
     _entity: &Entity<Counter>,
     _cmd: Touch,
@@ -117,6 +117,7 @@ wee_events::service! {
 // Concrete context satisfying CounterServiceEnv
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 struct AppCtx;
 
 impl HasStore for AppCtx {
@@ -131,13 +132,30 @@ impl HasRandomSource for AppCtx {
     }
 }
 
+impl<Store, Services> HasRandomSource for wee_events::HandlerEnv<Store, Services>
+where
+    Store: Send + Sync + 'static,
+    Services: HasRandomSource + 'static,
+{
+    fn random_bonus(&self) -> i64 {
+        self.services().random_bonus()
+    }
+}
+
+fn build_service() -> __wee_events_counter_service_core::Service<AppCtx, AppCtx> {
+    wee_events::create(CounterService)
+        .with_store(AppCtx)
+        .with_env(AppCtx)
+        .build()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn portable_service_executes_handler() {
-    let service = CounterService::portable(|| async { Ok(AppCtx) });
+async fn create_service_executes_handler() {
+    let service = build_service();
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = service.execute(&id, Increment { amount: 3 }).await.unwrap();
     // amount 3 + bonus 5 = 8
@@ -145,16 +163,16 @@ async fn portable_service_executes_handler() {
 }
 
 #[tokio::test]
-async fn portable_service_loads() {
-    let service = CounterService::portable(|| async { Ok(AppCtx) });
+async fn create_service_loads() {
+    let service = build_service();
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = service.load(&id).await.unwrap();
     assert_eq!(entity.state.value, 0);
 }
 
 #[tokio::test]
-async fn portable_service_handles_multiple_commands() {
-    let service = CounterService::portable(|| async { Ok(AppCtx) });
+async fn create_service_handles_multiple_commands() {
+    let service = build_service();
     let id: AggregateId = "counter:c1".parse().unwrap();
     // increment: 3 + 5 = 8
     let entity = service.execute(&id, Increment { amount: 3 }).await.unwrap();
@@ -165,8 +183,8 @@ async fn portable_service_handles_multiple_commands() {
 }
 
 #[tokio::test]
-async fn portable_service_reloads_after_void_handler() {
-    let service = CounterService::portable(|| async { Ok(AppCtx) });
+async fn create_service_reloads_after_void_handler() {
+    let service = build_service();
     let id: AggregateId = "counter:c1".parse().unwrap();
     let entity = service.execute(&id, Touch).await.unwrap();
     assert_eq!(entity.state.value, 0);
@@ -190,7 +208,7 @@ where
 
 #[tokio::test]
 async fn shared_caller_pattern() {
-    let service = CounterService::portable(|| async { Ok(AppCtx) });
+    let service = build_service();
     let id: AggregateId = "counter:c1".parse().unwrap();
     // Increment(1) + bonus(5) = 6, then Adjust is a no-op.
     // The loader always returns default (value: 0) so the Adjust call loads

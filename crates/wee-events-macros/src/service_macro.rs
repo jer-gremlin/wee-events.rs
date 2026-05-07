@@ -121,7 +121,7 @@ impl LoaderEntry {
 ///   Emits only `ServiceDefinition` + `HasCommand<C>` impls.
 ///
 /// - **Full**: `pub Name for State { loader: .., handlers: [..] }`
-///   Emits the env trait, portable constructor, and dispatch impls.
+///   Emits env traits, an in-process runtime, and Restate binding helpers.
 enum ServiceInput {
     DefinitionOnly(DefinitionOnlyInput),
     Full(FullServiceInput),
@@ -297,27 +297,6 @@ fn requires_path(fn_path: &Path) -> Path {
     req
 }
 
-// ---------------------------------------------------------------------------
-// Idx computation
-//
-// Handlers are registered via `with_handler` which prepends to the HList.
-// Input: [handler_0, handler_1, ..., handler_{N-1}]
-// After build: HandlerList<Cmd_{N-1}, ..., HandlerList<Cmd_0, _, EmptyHandlers>>
-// So the last input handler (index N-1) is the head → Here
-//    the first input handler (index 0) is deepest → There^(N-1)<Here>
-//
-// General: input index i → depth = N - 1 - i levels of There<...>
-// ---------------------------------------------------------------------------
-
-fn compute_idx(input_index: usize, total: usize) -> TokenStream2 {
-    let depth = total - 1 - input_index;
-    let mut idx = quote! { wee_events::Here };
-    for _ in 0..depth {
-        idx = quote! { wee_events::There<#idx> };
-    }
-    idx
-}
-
 fn remaining_type_for_subset(effect_markers: &[Ident], subset: usize) -> TokenStream2 {
     effect_markers
         .iter()
@@ -445,7 +424,6 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     }
 
     let loader_fn_path = &loader_entry.fn_path;
-    let total = handler_entries.len();
 
     // Derive spec and requires paths for the loader
     let loader_spec_path = spec_path(loader_fn_path);
@@ -507,220 +485,212 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     };
 
     // -----------------------------------------------------------------------
-    // 2. Handles<C> bounds for the portable() return type
-    //    Using <{fn}_Spec as HandlerSpec>::Command projections.
-    // -----------------------------------------------------------------------
-
-    let handles_bounds: Vec<TokenStream2> = handler_spec_paths
-        .iter()
-        .map(|sp| {
-            quote! {
-                + wee_events::Handles<<#sp as wee_events::HandlerSpec>::Command>
-                + wee_events::__private::DispatchCommand<
-                    <#sp as wee_events::HandlerSpec>::Command,
-                    Error = wee_events::Error,
-                >
-            }
-        })
-        .collect();
-
-    // -----------------------------------------------------------------------
-    // 3. with_handler calls inside portable()
-    // -----------------------------------------------------------------------
-
-    let with_handler_calls: Vec<TokenStream2> = handler_spec_paths
-        .iter()
-        .zip(handler_fn_paths.iter())
-        .map(|(sp, fn_path)| {
-            quote! {
-                .with_handler::<<#sp as wee_events::HandlerSpec>::Command, _>(#fn_path::<__R>)
-            }
-        })
-        .collect();
-
-    // -----------------------------------------------------------------------
-    // 4. Namespace struct with portable() constructor
+    // 2. Namespace struct
     // -----------------------------------------------------------------------
 
     let namespace_struct = quote! {
         /// Generated service namespace.
-        ///
-        /// Use [`portable`](#method.portable) for an in-process service with
-        /// fully static dispatch — handy for tests. Services whose loader and
-        /// handler errors diverge (for example, those returning
-        /// `ServiceError<Store::Error>` against an env-typed split) skip
-        /// `portable` and either go through the `wee_events_restate` adapter
-        /// or build a `BuiltService` manually.
         #vis struct #name;
-
-        impl #name {
-            /// Build a portable (in-process) service using the given factory.
-            ///
-            /// The macro pins both the loader and handler error to
-            /// `wee_events::Error` here — services whose handlers return a
-            /// richer service error must construct a `BuiltService` directly
-            /// via `ServiceBuilder` rather than calling `portable`.
-            ///
-            /// Emission of this helper is gated on a private feature of
-            /// the consuming crate (`__wee_events_portable`) so that
-            /// downstream crates which don't need it (e.g. the
-            /// `restate-counter` example) don't have to satisfy the
-            /// `crate::Error`-pinned bridge constraints. Crates that DO need
-            /// `portable()` (the wee-events tests) enable the feature in
-            /// their `Cargo.toml`.
-            #[cfg(feature = "__wee_events_portable")]
-            #[allow(clippy::implied_bounds_in_impls)]
-            #vis fn portable<__R, __F, __Fut>(factory: __F)
-                -> impl wee_events::TypedService<#state_type, Error = wee_events::Error>
-                       #(#handles_bounds)*
-            where
-                __R: #env_trait_name + 'static,
-                __F: ::std::ops::Fn() -> __Fut
-                    + ::std::marker::Send
-                    + ::std::marker::Sync
-                    + 'static,
-                __Fut: ::std::future::Future<Output = wee_events::Result<__R>>
-                    + ::std::marker::Send
-                    + 'static,
-            {
-                wee_events::ServiceBuilder::<
-                    #state_type,
-                    (),
-                    wee_events::EmptyHandlers,
-                    wee_events::Error,
-                    wee_events::Error,
-                >::new()
-                    .with_loader(#loader_fn_path::<__R>)
-                    #(#with_handler_calls)*
-                    .build(factory)
-            }
-        }
     };
 
     // -----------------------------------------------------------------------
-    // 5. DispatchCommand + Handles + TypedService impls on BuiltService
+    // 3. Core in-process service emitted for wee_events::create(...)
     // -----------------------------------------------------------------------
 
-    let dispatch_impls: Vec<TokenStream2> = handler_spec_paths
+    let core_mod_name = format_ident!("__wee_events_{}_core", to_snake_case(&name.to_string()));
+
+    let core_dispatch_impls: Vec<TokenStream2> = handler_spec_paths
         .iter()
-        .enumerate()
-        .map(|(i, sp)| {
-            let idx = compute_idx(i, total);
+        .zip(handler_requires_paths.iter())
+        .map(|(sp, handler_requires)| {
             quote! {
-                impl<__R, __L, __F, __H, __EL, __EH> wee_events::__private::DispatchCommand<
-                    <#sp as wee_events::HandlerSpec>::Command,
+                impl<__Store, __Services> ::wee_events::__private::DispatchCommand<
+                    <#sp as ::wee_events::HandlerSpec>::Command,
                 >
-                    for wee_events::BuiltService<__R, #state_type, __L, __F, __H, __EL, __EH>
+                    for Service<__Store, __Services>
                 where
-                    __R: #env_trait_name + 'static,
-                    __L: ::std::marker::Send + ::std::marker::Sync + 'static,
-                    __F: ::std::marker::Send + ::std::marker::Sync + 'static,
-                    __H: ::std::marker::Send + ::std::marker::Sync + 'static,
-                    __EL: ::std::convert::From<wee_events::Error>
+                    __Store:
+                        #loader_requires_path
+                        + ::std::clone::Clone
                         + ::std::marker::Send
                         + ::std::marker::Sync
                         + 'static,
-                    __EH: ::std::convert::From<wee_events::Error>
-                        + ::std::convert::From<__EL>
+                    __Services:
+                        ::std::clone::Clone
                         + ::std::marker::Send
                         + ::std::marker::Sync
                         + 'static,
-                    for<'a> &'a __L: wee_events::LoaderBridge<'a, __R, #state_type, __EL>,
-                    for<'a> &'a __F: wee_events::FactoryBridge<'a, __R>,
-                    __H: wee_events::HandleCommand<
-                        <#sp as wee_events::HandlerSpec>::Command,
-                        #idx,
-                        __R,
-                        #state_type,
-                        __EH,
+                    ::wee_events::HandlerEnv<__Store, __Services>:
+                        #handler_requires + ::std::marker::Send + ::std::marker::Sync + 'static,
+                    #loader_spec_path: ::wee_events::LoaderRuntimeSpec<__Store>,
+                    #sp: ::wee_events::HandlerRuntimeSpec<
+                        ::wee_events::HandlerEnv<__Store, __Services>,
                     >,
+                    <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::Error:
+                        ::std::marker::Send + ::std::marker::Sync + 'static,
+                    <#sp as ::wee_events::HandlerRuntimeSpec<
+                        ::wee_events::HandlerEnv<__Store, __Services>,
+                    >>::Error:
+                        ::std::convert::From<
+                            <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::Error,
+                        >
+                        + ::std::convert::From<::wee_events::Error>
+                        + ::std::marker::Send
+                        + ::std::marker::Sync
+                        + 'static,
+                    #state_type: ::std::marker::Send + ::std::marker::Sync + 'static,
                 {
-                    type Error = __EH;
+                    type Error = <#sp as ::wee_events::HandlerRuntimeSpec<
+                        ::wee_events::HandlerEnv<__Store, __Services>,
+                    >>::Error;
 
                     fn dispatch_command(
                         &self,
-                        id: &wee_events::AggregateId,
-                        cmd: <#sp as wee_events::HandlerSpec>::Command,
+                        id: &::wee_events::AggregateId,
+                        cmd: <#sp as ::wee_events::HandlerSpec>::Command,
                     ) -> impl ::std::future::Future<
                         Output = ::std::result::Result<
-                            wee_events::Entity<#state_type>,
-                            __EH,
+                            ::wee_events::Entity<#state_type>,
+                            Self::Error,
                         >,
                     > + ::std::marker::Send {
+                        let store = self.store.clone();
+                        let services = self.services.clone();
                         let id = id.clone();
                         async move {
-                            let ctx = <&__F as wee_events::FactoryBridge<'_, __R>>::call(&self.factory)
+                            let entity =
+                                <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::load(
+                                    &store,
+                                    &id,
+                                )
                                 .await
-                                .map_err(<__EH as ::std::convert::From<wee_events::Error>>::from)?;
-                            let entity = <&__L as wee_events::LoaderBridge<'_, __R, #state_type, __EL>>::call(&self.loader, &ctx, &id)
-                                .await
-                                .map_err(<__EH as ::std::convert::From<__EL>>::from)?;
-                            match self.handlers.handle(&ctx, &entity, cmd).await? {
-                                wee_events::HandlerOutcome::Entity(entity) => Ok(entity),
-                                wee_events::HandlerOutcome::Reload => {
-                                    <&__L as wee_events::LoaderBridge<'_, __R, #state_type, __EL>>::call(&self.loader, &ctx, &id)
+                                .map_err(<Self::Error as ::std::convert::From<
+                                    <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::Error,
+                                >>::from)?;
+                            let env = ::wee_events::HandlerEnv::new(store.clone(), services);
+                            match <#sp as ::wee_events::HandlerRuntimeSpec<
+                                ::wee_events::HandlerEnv<__Store, __Services>,
+                            >>::handle(
+                                    &env,
+                                    &entity,
+                                    cmd,
+                                )
+                                .await?
+                            {
+                                ::wee_events::HandlerOutcome::Entity(entity) => Ok(entity),
+                                ::wee_events::HandlerOutcome::Reload => {
+                                    <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::load(
+                                        &store,
+                                        &id,
+                                    )
                                         .await
-                                        .map_err(<__EH as ::std::convert::From<__EL>>::from)
+                                        .map_err(<Self::Error as ::std::convert::From<
+                                            <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::Error,
+                                        >>::from)
                                 }
                             }
                         }
                     }
                 }
 
-                impl<__R, __L, __F, __H, __EL, __EH> wee_events::Handles<
-                    <#sp as wee_events::HandlerSpec>::Command,
+                impl<__Store, __Services> ::wee_events::Handles<
+                    <#sp as ::wee_events::HandlerSpec>::Command,
                 >
-                    for wee_events::BuiltService<__R, #state_type, __L, __F, __H, __EL, __EH>
+                    for Service<__Store, __Services>
                 where
-                    wee_events::BuiltService<__R, #state_type, __L, __F, __H, __EL, __EH>:
-                        wee_events::__private::DispatchCommand<
-                            <#sp as wee_events::HandlerSpec>::Command,
-                        >,
+                    Service<__Store, __Services>: ::wee_events::__private::DispatchCommand<
+                        <#sp as ::wee_events::HandlerSpec>::Command,
+                    >,
                 {}
             }
         })
         .collect();
 
-    let typed_service_impl = quote! {
-        impl<__R, __L, __F, __H, __EL, __EH> wee_events::TypedService<#state_type>
-            for wee_events::BuiltService<__R, #state_type, __L, __F, __H, __EL, __EH>
-        where
-            __R: #env_trait_name + 'static,
-            __L: ::std::marker::Send + ::std::marker::Sync + 'static,
-            __F: ::std::marker::Send + ::std::marker::Sync + 'static,
-            __H: ::std::marker::Send + ::std::marker::Sync + 'static,
-            __EL: ::std::convert::From<wee_events::Error>
-                + ::std::marker::Send
-                + ::std::marker::Sync
-                + 'static,
-            __EH: ::std::marker::Send + ::std::marker::Sync + 'static,
-            for<'a> &'a __L: wee_events::LoaderBridge<'a, __R, #state_type, __EL>,
-            for<'a> &'a __F: wee_events::FactoryBridge<'a, __R>,
-        {
-            type Error = __EL;
+    let core_service = quote! {
+        #vis mod #core_mod_name {
+            use super::*;
 
-            fn load(
-                &self,
-                id: &wee_events::AggregateId,
-            ) -> impl ::std::future::Future<
-                Output = ::std::result::Result<
-                    wee_events::Entity<#state_type>,
-                    __EL,
-                >,
-            > + ::std::marker::Send {
-                let id = id.clone();
-                async move {
-                    let ctx = <&__F as wee_events::FactoryBridge<'_, __R>>::call(&self.factory)
-                        .await
-                        .map_err(<__EL as ::std::convert::From<wee_events::Error>>::from)?;
-                    <&__L as wee_events::LoaderBridge<'_, __R, #state_type, __EL>>::call(&self.loader, &ctx, &id).await
+            pub struct Service<__Store, __Services> {
+                store: __Store,
+                services: __Services,
+            }
+
+            impl<__Store, __Services> Service<__Store, __Services> {
+                pub fn new(store: __Store, services: __Services) -> Self {
+                    Self { store, services }
                 }
+            }
+
+            impl<__Store, __Services> ::wee_events::__private::ServiceState
+                for Service<__Store, __Services>
+            where
+                #state_type: ::std::marker::Send + ::std::marker::Sync,
+                __Store: ::std::marker::Send + ::std::marker::Sync,
+                __Services: ::std::marker::Send + ::std::marker::Sync,
+            {
+                type State = #state_type;
+            }
+
+            impl<__Store, __Services> ::wee_events::TypedService<#state_type>
+                for Service<__Store, __Services>
+            where
+                __Store:
+                    #loader_requires_path
+                    + ::std::clone::Clone
+                    + ::std::marker::Send
+                    + ::std::marker::Sync
+                    + 'static,
+                __Services:
+                    ::std::clone::Clone
+                    + ::std::marker::Send
+                    + ::std::marker::Sync
+                    + 'static,
+                #loader_spec_path: ::wee_events::LoaderRuntimeSpec<__Store>,
+                <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::Error:
+                    ::std::marker::Send + ::std::marker::Sync + 'static,
+                #state_type: ::std::marker::Send + ::std::marker::Sync + 'static,
+            {
+                type Error = <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::Error;
+
+                fn load(
+                    &self,
+                    id: &::wee_events::AggregateId,
+                ) -> impl ::std::future::Future<
+                    Output = ::std::result::Result<
+                        ::wee_events::Entity<#state_type>,
+                        Self::Error,
+                    >,
+                > + ::std::marker::Send {
+                    let store = self.store.clone();
+                    let id = id.clone();
+                    async move {
+                        <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::load(
+                            &store,
+                            &id,
+                        )
+                        .await
+                    }
+                }
+            }
+
+            #(#core_dispatch_impls)*
+        }
+
+        impl ::wee_events::InProcessServiceDefinition for #name {
+            type Built<__Store, __Services> =
+                #core_mod_name::Service<__Store, __Services>;
+
+            fn build_in_process<__Store, __Services>(
+                store: __Store,
+                services: __Services,
+            ) -> Self::Built<__Store, __Services> {
+                #core_mod_name::Service::new(store, services)
             }
         }
     };
 
     // -----------------------------------------------------------------------
-    // 6. Suppress the loader_spec_path unused warning (it's referenced only
+    // 4. Suppress the loader_spec_path unused warning (it's referenced only
     //    for the env trait, not for dispatch). Actually it is used — never mind.
     // -----------------------------------------------------------------------
 
@@ -738,7 +708,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     };
 
     // -----------------------------------------------------------------------
-    // 7. ServiceDefinition + HasCommand<C> impls (definition traits)
+    // 5. ServiceDefinition + HasCommand<C> impls (definition traits)
     // -----------------------------------------------------------------------
 
     let service_name_lit = LitStr::new(&service_name, proc_macro2::Span::call_site());
@@ -1244,9 +1214,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
 
         #namespace_struct
 
-        #(#dispatch_impls)*
-
-        #typed_service_impl
+        #core_service
 
         #loader_spec_assertion
 

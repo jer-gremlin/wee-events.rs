@@ -1,29 +1,22 @@
-mod bundle;
 mod client;
 mod correlation;
 mod effects;
 mod error;
-mod executor;
 #[doc(hidden)]
 pub mod generated;
-mod loader;
 #[doc(hidden)]
 pub mod names;
-mod service;
 mod types;
 
 use std::marker::PhantomData;
 
-pub use bundle::{service_bundle, ServiceBundle};
 pub use client::RestateClient;
 pub use correlation::correlation_id;
 pub use effects::{EffectRouter, EffectTrigger, SideEffectFilter};
 pub use error::Error;
-pub use executor::CommandHandler;
-pub use loader::LoadHandler;
 pub use names::{executor_name, loader_name, runner_name};
-pub use service::{JsonService, ServiceAdapter, ServiceResponse};
 pub use types::{CommandRequest, EntityResponse, ExecuteNotification, ExecuteRequest, Metadata};
+pub use wee_events::HandlerEnv;
 
 pub struct Ready;
 
@@ -67,67 +60,6 @@ pub struct RestateServiceBuilder<Service> {
 pub struct RestateServiceStoreBuilder<Service, Store> {
     service: Service,
     store: Store,
-}
-
-pub struct HandlerEnv<Store, Services> {
-    store: Store,
-    services: Services,
-}
-
-impl<Store, Services> HandlerEnv<Store, Services> {
-    pub fn new(store: Store, services: Services) -> Self {
-        Self { store, services }
-    }
-
-    pub fn store(&self) -> &Store {
-        &self.store
-    }
-
-    pub fn services(&self) -> &Services {
-        &self.services
-    }
-}
-
-impl<Store, Services> wee_events::HasPublisher for HandlerEnv<Store, Services>
-where
-    Store: wee_events::EventStore + wee_events::EncodesEvents,
-    Services: Send + Sync,
-{
-    type Store = Store;
-
-    fn publisher(&self) -> wee_events::Publisher<'_, Self::Store> {
-        wee_events::Publisher::new(self.store())
-    }
-}
-
-/// `HandlerEnv` delegates `EventStore` to its inner store. This lets
-/// portable in-process services use a single env type that is BOTH the
-/// store (for the loader) and a publisher (for handlers), so loader and
-/// handler errors unify on `<Store as EventStore>::Error`.
-impl<Store, Services> wee_events::EventStore for HandlerEnv<Store, Services>
-where
-    Store: wee_events::EventStore,
-    Services: Send + Sync,
-{
-    type Error = Store::Error;
-
-    fn load(
-        &self,
-        id: &wee_events::AggregateId,
-    ) -> impl ::std::future::Future<Output = ::std::result::Result<wee_events::Aggregate, Self::Error>>
-           + Send {
-        self.store.load(id)
-    }
-
-    fn publish(
-        &self,
-        aggregate_id: &wee_events::AggregateId,
-        options: wee_events::PublishOptions,
-        events: ::std::vec::Vec<wee_events::RawEvent>,
-    ) -> impl ::std::future::Future<Output = ::std::result::Result<wee_events::ChangeSet, Self::Error>>
-           + Send {
-        self.store.publish(aggregate_id, options, events)
-    }
 }
 
 pub fn create<Service>(service: Service) -> RestateServiceBuilder<Service> {

@@ -9,40 +9,40 @@ use wee_events::{AggregateId, Command, Entity, Revision};
 pub struct Counter;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct Inc;
+pub struct Inc;
 impl Command for Inc {
     const NAME: &'static str = "counter:increment";
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct Adj;
+pub struct Adj;
 impl Command for Adj {
     const NAME: &'static str = "counter:adjust";
 }
 
 #[restate_sdk::workflow]
-trait SendWelcomeEmail {
+pub trait SendWelcomeEmail {
     async fn run(
         notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
     ) -> Result<(), restate_sdk::errors::HandlerError>;
 }
 
 #[restate_sdk::workflow]
-trait UpdateAnalytics {
+pub trait UpdateAnalytics {
     async fn run(
         notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
     ) -> Result<(), restate_sdk::errors::HandlerError>;
 }
 
 #[restate_sdk::workflow]
-trait AuditLog {
+pub trait AuditLog {
     async fn run(
         notification: restate_sdk::serde::Json<wee_events_restate::ExecuteNotification>,
     ) -> Result<(), restate_sdk::errors::HandlerError>;
 }
 
 #[wee_events::loader]
-async fn load<R: Send + Sync + 'static>(
+pub async fn load<R: Send + Sync + 'static>(
     _env: &R,
     id: &AggregateId,
 ) -> wee_events::Result<Entity<Counter>> {
@@ -54,7 +54,7 @@ async fn load<R: Send + Sync + 'static>(
 }
 
 #[wee_events::handler(command = Inc)]
-async fn inc<R: Send + Sync + 'static>(
+pub async fn inc<R: Send + Sync + 'static>(
     _env: &R,
     e: &Entity<Counter>,
     _cmd: Inc,
@@ -63,7 +63,7 @@ async fn inc<R: Send + Sync + 'static>(
 }
 
 #[wee_events::handler(command = Adj)]
-async fn adj<R: Send + Sync + 'static>(
+pub async fn adj<R: Send + Sync + 'static>(
     _env: &R,
     e: &Entity<Counter>,
     _cmd: Adj,
