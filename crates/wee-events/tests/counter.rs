@@ -138,12 +138,9 @@ async fn load_entity(
     id: &AggregateId,
 ) -> Result<Entity<CounterState>, MemoryStoreError> {
     let aggregate = store.load(id).await?;
-    renderer.render(&aggregate).map_err(|e| match e {
-        wee_events::DeserializeJsonError::EncodingMismatch { expected, actual } => {
-            MemoryStoreError::from(wee_events::Error::EncodingMismatch { expected, actual })
-        }
-        wee_events::DeserializeJsonError::Decode(e) => MemoryStoreError::from(e),
-    })
+    renderer
+        .render(&aggregate)
+        .map_err(wee_events::DeserializeJsonError::into_store_error)
 }
 
 // ---------------------------------------------------------------------------

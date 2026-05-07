@@ -1,4 +1,4 @@
-use wee_events::{Rejection, ServiceError};
+use wee_events::{CodecError, DecodeError, EncodeError, Rejection, ServiceError};
 
 /// Errors produced by the wee-events-restate adapter.
 ///
@@ -11,10 +11,10 @@ pub enum Error {
     Transport(#[from] reqwest::Error),
 
     #[error("decode: {0}")]
-    Decode(#[from] serde_json::Error),
+    Decode(#[from] DecodeError),
 
     #[error("encode: {0}")]
-    Encode(#[from] wee_events::EncodeError),
+    Encode(#[from] EncodeError),
 
     #[error("backend: {0}")]
     Backend(String),
@@ -24,6 +24,21 @@ pub enum Error {
 
     #[error(transparent)]
     Store(#[from] wee_events::Error),
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Error::Decode(DecodeError::Json(err))
+    }
+}
+
+impl From<CodecError> for Error {
+    fn from(err: CodecError) -> Self {
+        match err {
+            CodecError::Encode(e) => Error::Encode(e),
+            CodecError::Decode(e) => Error::Decode(e),
+        }
+    }
 }
 
 /// Lifts a service-layer error into the adapter error.
@@ -38,7 +53,7 @@ where
     fn from(value: ServiceError<E>) -> Self {
         match value {
             ServiceError::Rejection(r) => Error::Rejection(r),
-            ServiceError::Codec(e) => Error::Encode(e),
+            ServiceError::Codec(e) => e.into(),
             ServiceError::Store(e) => Error::Backend(e.to_string()),
         }
     }

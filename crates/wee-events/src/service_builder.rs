@@ -137,6 +137,15 @@ where
 /// to call the factory without boxing the concrete closure type. Factories
 /// remain pinned to `crate::Result<Ctx>` — context construction is an
 /// infrastructure concern.
+///
+/// **Failure surface:** factory failures are converted into the loader's
+/// `EL` (and the handler's `EH`) via the `From<crate::Error>` bound on each.
+/// When `EL = ServiceError<E>`, that route lands in `ServiceError::Store(E::from(crate::Error))`,
+/// so a context-construction failure is indistinguishable from a store-load
+/// failure to the caller. This is intentional — the loader contract treats
+/// "couldn't get a context" and "couldn't load the aggregate" as equally
+/// fatal infrastructure conditions — but worth knowing if you're triaging
+/// errors at the service boundary.
 #[doc(hidden)]
 pub trait FactoryBridge<'a, Ctx>: Sized {
     fn call(f: Self) -> BoxFuture<'a, crate::Result<Ctx>>;

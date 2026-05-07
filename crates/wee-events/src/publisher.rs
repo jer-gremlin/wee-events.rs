@@ -36,8 +36,7 @@ where
                     data: encoder.serialize(event)?,
                 })
             })
-            .collect::<Result<Vec<_>, crate::EncodeError>>()
-            .map_err(ServiceError::Codec)?;
+            .collect::<Result<Vec<_>, crate::EncodeError>>()?;
 
         self.store
             .publish(
