@@ -805,6 +805,8 @@ impl TursoProvisioner for FixedRemoteTargetProvisioner {}
 struct TestSqldNamespaceProvisioner {
     url: String,
     admin_url: String,
+    namespace_prefix: String,
+    created_namespaces: Arc<Mutex<HashSet<String>>>,
     known_names: Arc<Mutex<HashSet<String>>>,
     client: reqwest::Client,
 }
@@ -814,22 +816,27 @@ impl TestSqldNamespaceProvisioner {
         Self {
             url,
             admin_url,
+            namespace_prefix: format!("test-{}", ulid::Ulid::new().to_string().to_lowercase()),
+            created_namespaces: Arc::new(Mutex::new(HashSet::new())),
             known_names: Arc::new(Mutex::new(HashSet::new())),
             client: reqwest::Client::new(),
         }
     }
 
+    fn namespace_for_name(&self, name: PartitionName<'_>) -> String {
+        let suffix = match name {
+            PartitionName::Default => "default".to_string(),
+            PartitionName::Named(name) => sanitize(name),
+        };
+
+        format!("{}-{suffix}", self.namespace_prefix)
+    }
+
     fn target_for_name(&self, name: PartitionName<'_>) -> DatabaseTarget {
-        match name {
-            PartitionName::Named(name) => DatabaseTarget::SqldNamespace {
-                url: self.url.clone(),
-                auth_token: String::new(),
-                namespace: format!("partition-{}", sanitize(name)),
-            },
-            PartitionName::Default => DatabaseTarget::SqldDefault {
-                url: self.url.clone(),
-                auth_token: String::new(),
-            },
+        DatabaseTarget::SqldNamespace {
+            url: self.url.clone(),
+            auth_token: String::new(),
+            namespace: self.namespace_for_name(name),
         }
     }
 }
@@ -839,13 +846,9 @@ impl NamedTargetProvisioner for TestSqldNamespaceProvisioner {
         &self,
         name: PartitionName<'_>,
     ) -> Result<DatabaseTarget, Error> {
-        let PartitionName::Named(name) = name else {
-            return Ok(self.target_for_name(PartitionName::Default));
-        };
-
-        let namespace = format!("partition-{}", sanitize(name));
-        let target = self.target_for_name(PartitionName::Named(name));
-        if self.known_names.lock().unwrap().contains(name) {
+        let namespace = self.namespace_for_name(name);
+        let target = self.target_for_name(name);
+        if self.created_namespaces.lock().unwrap().contains(&namespace) {
             return Ok(target);
         }
 
@@ -877,7 +880,13 @@ impl NamedTargetProvisioner for TestSqldNamespaceProvisioner {
             )));
         }
 
-        self.known_names.lock().unwrap().insert(name.to_string());
+        self.created_namespaces
+            .lock()
+            .unwrap()
+            .insert(namespace.to_string());
+        if let PartitionName::Named(name) = name {
+            self.known_names.lock().unwrap().insert(name.to_string());
+        }
         Ok(target)
     }
 
@@ -885,16 +894,12 @@ impl NamedTargetProvisioner for TestSqldNamespaceProvisioner {
         &self,
         name: PartitionName<'_>,
     ) -> Result<Option<DatabaseTarget>, Error> {
-        let PartitionName::Named(name) = name else {
-            return Ok(Some(self.target_for_name(PartitionName::Default)));
-        };
-
         Ok(self
-            .known_names
+            .created_namespaces
             .lock()
             .unwrap()
-            .contains(name)
-            .then(|| self.target_for_name(PartitionName::Named(name))))
+            .contains(&self.namespace_for_name(name))
+            .then(|| self.target_for_name(name)))
     }
 
     async fn names(&self) -> Result<Vec<String>, Error> {
@@ -903,6 +908,45 @@ impl NamedTargetProvisioner for TestSqldNamespaceProvisioner {
 }
 
 impl SqldNamespacedProvisioner for TestSqldNamespaceProvisioner {}
+
+#[test]
+fn sqld_namespace_provisioners_use_unique_namespaces() {
+    let first = TestSqldNamespaceProvisioner::new(
+        "http://localhost:8080".to_string(),
+        "http://localhost:9090".to_string(),
+    );
+    let second = TestSqldNamespaceProvisioner::new(
+        "http://localhost:8080".to_string(),
+        "http://localhost:9090".to_string(),
+    );
+
+    assert_ne!(
+        first.target_for_name(PartitionName::Named("orders")),
+        second.target_for_name(PartitionName::Named("orders"))
+    );
+    assert_ne!(
+        first.target_for_name(PartitionName::Default),
+        second.target_for_name(PartitionName::Default)
+    );
+}
+
+#[test]
+fn cloned_sqld_namespace_provisioners_share_namespaces() {
+    let first = TestSqldNamespaceProvisioner::new(
+        "http://localhost:8080".to_string(),
+        "http://localhost:9090".to_string(),
+    );
+    let second = first.clone();
+
+    assert_eq!(
+        first.target_for_name(PartitionName::Named("orders")),
+        second.target_for_name(PartitionName::Named("orders"))
+    );
+    assert_eq!(
+        first.target_for_name(PartitionName::Default),
+        second.target_for_name(PartitionName::Default)
+    );
+}
 
 trait LocalStorePath {
     fn local_store_path(temp_dir: &tempfile::TempDir) -> PathBuf;
