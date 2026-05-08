@@ -49,6 +49,8 @@ pub enum DecodeError {
     UnknownEncoding { encoding: String },
     #[error("encoding mismatch: expected {expected}, actual {actual}")]
     EncodingMismatch { expected: String, actual: String },
+    #[error("invalid decoded event data: {message}")]
+    InvalidData { message: String },
     #[error("json decode: {0}")]
     Json(#[from] serde_json::Error),
     #[error("cbor decode: {0}")]

@@ -14,7 +14,7 @@ pub async fn apply_projection<S: Default + Serialize>(
     let aggregate = event_store.load(&changeset.aggregate_id).await?;
     let entity = renderer
         .render(&aggregate)
-        .map_err(DeserializeJsonError::into_store_error::<Error>)?;
+        .map_err(wee_events::RenderError::<DeserializeJsonError>::into_store_error::<Error>)?;
     let document = serde_json::to_value(&entity.state)?;
 
     document_store
@@ -55,7 +55,7 @@ pub async fn rebuild_projection<S: Default + Serialize>(
 
         let entity = renderer
             .render(&aggregate)
-            .map_err(DeserializeJsonError::into_store_error::<Error>)?;
+            .map_err(wee_events::RenderError::<DeserializeJsonError>::into_store_error::<Error>)?;
         let document = serde_json::to_value(&entity.state)?;
 
         document_store

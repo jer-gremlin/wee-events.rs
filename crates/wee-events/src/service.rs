@@ -67,6 +67,31 @@ where
     }
 }
 
+impl<E> From<crate::DecodeError> for ServiceError<E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: crate::DecodeError) -> Self {
+        ServiceError::Codec(err.into())
+    }
+}
+
+impl<E> From<crate::RenderError<crate::DecodeError>> for ServiceError<E>
+where
+    E: From<crate::Error> + std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: crate::RenderError<crate::DecodeError>) -> Self {
+        match err {
+            crate::RenderError::UnhandledEventType { context } => {
+                ServiceError::Store(E::from(crate::Error::UnhandledEventType {
+                    event_type: context.event_type.to_string(),
+                }))
+            }
+            crate::RenderError::ApplyFailed { source, .. } => ServiceError::Codec(source.into()),
+        }
+    }
+}
+
 /// Lift a [`DeserializeJsonError`] into a [`ServiceError`]: encoding-mismatch
 /// is a structural store-contract failure (routed through `Store(E)` via the
 /// store error's `From<crate::Error>` impl), and a decode failure is a codec
