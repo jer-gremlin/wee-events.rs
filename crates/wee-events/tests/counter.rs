@@ -140,7 +140,7 @@ async fn load_entity(
     let aggregate = store.load(id).await?;
     renderer
         .render(&aggregate)
-        .map_err(wee_events::DeserializeJsonError::into_store_error)
+        .map_err(wee_events::RenderError::into_store_error)
 }
 
 // ---------------------------------------------------------------------------
@@ -403,7 +403,7 @@ async fn derive_macros_generate_correct_names() {
 }
 
 #[tokio::test]
-async fn unmapped_events_silently_skipped() {
+async fn explicitly_ignored_events_are_skipped() {
     let store = MemoryStore::new();
     let id = AggregateId::new("counter", "test-1");
 
@@ -416,7 +416,7 @@ async fn unmapped_events_silently_skipped() {
         .await
         .unwrap();
 
-    let renderer = build_renderer();
+    let renderer = build_renderer().ignore("counter:unknown-event");
     let entity = load_entity(&store, &renderer, &id).await.unwrap();
     assert_eq!(entity.state.value, 0);
     assert_eq!(entity.state.event_count, 0);

@@ -34,6 +34,9 @@ pub enum Error {
     #[error("encoding mismatch: expected {expected}, actual {actual}")]
     EncodingMismatch { expected: String, actual: String },
 
+    #[error("unhandled event type: {event_type}")]
+    UnhandledEventType { event_type: String },
+
     #[error("publish failed after {attempts} attempts ({diagnostics})")]
     RetryExhausted {
         attempts: usize,

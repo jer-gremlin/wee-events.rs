@@ -41,7 +41,7 @@ pub use id::{
     EventType, Revision,
 };
 pub use publisher::{HasPublisher, Publisher};
-pub use renderer::{ReduceFn, Renderer};
+pub use renderer::{EventPattern, EventPatternError, ReduceFn, RenderError, Renderer};
 #[doc(hidden)]
 pub use service::__private;
 pub use service::{Handles, HasCommand, Rejection, ServiceDefinition, ServiceError, TypedService};
