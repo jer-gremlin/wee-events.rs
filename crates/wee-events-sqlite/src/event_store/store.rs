@@ -16,7 +16,7 @@ use wee_events::{
     RetryDiagnostics, Revision,
 };
 
-use crate::{database, Error};
+use crate::{Error, database};
 
 use super::backends::{
     BackendBinding, InMemoryTargetResolver, LocalPartitionCatalog, NamedTargetCatalog,

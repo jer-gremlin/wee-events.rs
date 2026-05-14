@@ -86,12 +86,11 @@ impl<D: ServiceDefinition> RestateClient<D> {
             if let Ok(rejection) = serde_json::from_str::<Rejection>(&text) {
                 return Err(Error::Rejection(rejection));
             }
-            if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
-                if let Some(message) = envelope.get("message").and_then(|m| m.as_str()) {
-                    if let Ok(rejection) = serde_json::from_str::<Rejection>(message) {
-                        return Err(Error::Rejection(rejection));
-                    }
-                }
+            if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text)
+                && let Some(message) = envelope.get("message").and_then(|m| m.as_str())
+                && let Ok(rejection) = serde_json::from_str::<Rejection>(message)
+            {
+                return Err(Error::Rejection(rejection));
             }
             return Err(Error::Backend(text));
         }

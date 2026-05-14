@@ -27,8 +27,8 @@ pub use codec::{
 };
 pub use command::Command;
 pub use create::{
-    create, InProcessServiceDefinition, ServiceCreateBuilder, ServiceCreateEnvBuilder,
-    ServiceCreateStoreBuilder,
+    InProcessServiceDefinition, ServiceCreateBuilder, ServiceCreateEnvBuilder,
+    ServiceCreateStoreBuilder, create,
 };
 pub use entity::Entity;
 pub use error::{Error, EventStoreErrorExt, RetryDiagnostics};
@@ -54,7 +54,7 @@ pub use service_builder::{FactoryBridge, HandleCommand, HandlerBridge, HandlerLi
 pub use service_builder::{HandlerOutcome, IntoHandlerOutcome};
 pub use spec::{HandlerRuntimeSpec, HandlerSpec, LoaderRuntimeSpec, LoaderSpec};
 pub use store::{EventStore, PublishOptions, RawEvent};
-pub use wee_events_macros::{capability, handler, loader, service, Command, DomainEvent};
+pub use wee_events_macros::{Command, DomainEvent, capability, handler, loader, service};
 
 pub mod memory {
     pub use crate::memory_store::{MemoryStore, MemoryStoreBacking, MemoryStoreError};

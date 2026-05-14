@@ -47,10 +47,9 @@ pub async fn rebuild_projection<S: Default + Serialize>(
         if let Some(document) = document_store
             .get(collection, aggregate_id.aggregate_key())
             .await?
+            && document.revision == *aggregate.revision()
         {
-            if document.revision == *aggregate.revision() {
-                continue;
-            }
+            continue;
         }
 
         let entity = renderer

@@ -4,7 +4,7 @@ use libsql::Connection;
 use tokio::sync::Mutex;
 use wee_events::Revision;
 
-use crate::{database, Error};
+use crate::{Error, database};
 
 /// A projected document stored in the `documents` table.
 #[derive(Debug, Clone)]
