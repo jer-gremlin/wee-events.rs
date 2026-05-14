@@ -7,11 +7,7 @@ rust-version.workspace = true
 readme.workspace = true
 # TODO: set public repository/homepage/documentation URLs before publishing.
 
-# Suppress the implicit libtest bench harness on the lib target. The only
-# bench in this crate is the criterion one declared in `[[bench]]` below;
-# without this flag `cargo bench` also tries to run the lib's auto-generated
-# libtest harness, which doesn't recognise criterion flags like
-# `--save-baseline` and dies with "Unrecognised option".
+# Surpress so --save-baseline etc from criterion can be used
 [lib]
 bench = false
 
