@@ -592,35 +592,55 @@ pub fn bench_mixed_read_write<S: EventStore + 'static>(
 ) {
     let mut group = c.benchmark_group(format!("{prefix}/mixed/read_write_spread"));
     for &n in levels {
-        // N readers + N writers = 2N total tasks, interleaved.
-        // Even indices read, odd indices write.
-        let all_ids: Vec<_> = (0..2 * n).map(make_spread_id).collect();
-        for id in &all_ids {
-            seed_aggregate(rt, &**store, id, 50);
-        }
-
         group.bench_function(format!("{n}r_{n}w"), |b| {
-            b.to_async(rt).iter(|| {
-                let store = Arc::clone(store);
-                let all_ids = all_ids.clone();
+            // `iter_custom` + `JoinSet`:
+            //   setup (untimed) : 2N fresh aggregates each seeded with 50 events.
+            //                     Even indices are read targets, odd are write
+            //                     targets — same convention as before.
+            //   timed region    : spawn 2N tasks; readers `load`, writers
+            //                     `publish`; drain.
+            //
+            // Previous form seeded once outside the bench and let writes
+            // mutate that pool every iter — aggregates grew to enormous
+            // size by the end of the run, slowing late iterations and
+            // skewing the reported mean. With per-iter reseeding every
+            // measurement starts at the same state.
+            let store = Arc::clone(store);
+            b.to_async(rt).iter_custom(move |iters| {
+                let store = Arc::clone(&store);
                 async move {
-                    let mut set = JoinSet::new();
-                    for (i, id) in all_ids.into_iter().enumerate() {
-                        let store = Arc::clone(&store);
-                        let is_reader = i % 2 == 0;
-                        set.spawn(async move {
-                            if is_reader {
-                                store.load(&id).await.expect("load should succeed in bench");
-                            } else {
-                                let (_, raw) = make_raw_events(1);
-                                store
-                                    .publish(&id, PublishOptions::default(), raw)
-                                    .await
-                                    .expect("publish should succeed in bench");
-                            }
-                        });
+                    let mut total = Duration::ZERO;
+                    for _ in 0..iters {
+                        let all_ids: Vec<AggregateId> = (0..2 * n).map(make_spread_id).collect();
+                        for id in &all_ids {
+                            let (_, seed) = make_raw_events(50);
+                            store
+                                .publish(id, PublishOptions::default(), seed)
+                                .await
+                                .expect("seed should succeed in bench");
+                        }
+
+                        let start = Instant::now();
+                        let mut set = JoinSet::new();
+                        for (i, id) in all_ids.into_iter().enumerate() {
+                            let store = Arc::clone(&store);
+                            let is_reader = i % 2 == 0;
+                            set.spawn(async move {
+                                if is_reader {
+                                    store.load(&id).await.expect("load should succeed in bench");
+                                } else {
+                                    let (_, raw) = make_raw_events(1);
+                                    store
+                                        .publish(&id, PublishOptions::default(), raw)
+                                        .await
+                                        .expect("publish should succeed in bench");
+                                }
+                            });
+                        }
+                        drain(set).await;
+                        total += start.elapsed();
                     }
-                    drain(set).await;
+                    total
                 }
             });
         });

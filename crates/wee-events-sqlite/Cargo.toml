@@ -7,6 +7,12 @@ rust-version.workspace = true
 readme.workspace = true
 # TODO: set public repository/homepage/documentation URLs before publishing.
 
+# Same rationale as `wee-events/Cargo.toml`: only the criterion bench below
+# is intended; suppress the implicit libtest bench harness on the lib so
+# `cargo bench -- --save-baseline ...` doesn't fanout into a libtest run.
+[lib]
+bench = false
+
 [features]
 turso = ["dep:reqwest"]
 
