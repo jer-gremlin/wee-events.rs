@@ -5,14 +5,16 @@ members = [
     "crates/wee-events",
     "crates/wee-events-sqlite",
     "crates/wee-events-restate",
+    "crates/sins",
     "examples/restate-counter",
 ]
+exclude = ["examples/coroutine-door"]
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 license = "MIT"
 version = "0.1.0"
-rust-version = "1.83"
+rust-version = "1.85"
 readme = "README.md"
 
 [workspace.dependencies]
