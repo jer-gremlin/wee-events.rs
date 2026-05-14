@@ -52,7 +52,7 @@ pub struct MemoryStore {
 /// streams and revision generator, which is useful for contract tests that
 /// exercise multiple store instances over one logical persistence layer.
 pub struct MemoryStoreBacking {
-    streams: Mutex<HashMap<AggregateId, Vec<RecordedEvent>>>,
+    streams: Mutex<HashMap<AggregateId, Vec<Arc<RecordedEvent>>>>,
     generator: Mutex<Generator>,
 }
 
@@ -97,7 +97,8 @@ impl MemoryStore {
         let streams = self.backing.streams.lock().expect("streams mutex poisoned");
         match streams.get(id) {
             Some(events) if !events.is_empty() => {
-                Aggregate::from_events(id.clone(), events.clone())
+                // Vec<Arc<_>>::clone is N refcount bumps, not N deep copies.
+                Aggregate::from_shared_events(id.clone(), events.clone())
             }
             _ => Aggregate::empty(id.clone()),
         }
@@ -136,15 +137,21 @@ impl MemoryStore {
             correlation_id: options.correlation_id,
         };
 
-        let recorded: Vec<RecordedEvent> = events
+        // Build each `RecordedEvent` once, wrap in `Arc`, push the same `Arc`
+        // into both the store-side stream and the returned `ChangeSet`. One
+        // allocation per event; the store retains and the caller observes via
+        // refcount bumps.
+        let recorded: Vec<Arc<RecordedEvent>> = events
             .into_iter()
             .zip(minted)
-            .map(|(raw, (event_id, revision))| RecordedEvent {
-                event_id,
-                event_type: raw.event_type,
-                revision,
-                metadata: metadata.clone(),
-                data: raw.data,
+            .map(|(raw, (event_id, revision))| {
+                Arc::new(RecordedEvent {
+                    event_id,
+                    event_type: raw.event_type,
+                    revision,
+                    metadata: metadata.clone(),
+                    data: raw.data,
+                })
             })
             .collect();
 
@@ -153,7 +160,7 @@ impl MemoryStore {
             .expect("recorded is non-empty: events.is_empty() was false")
             .revision
             .clone();
-        existing.extend(recorded.clone());
+        existing.extend(recorded.iter().cloned());
 
         Ok(ChangeSet {
             aggregate_id: aggregate_id.clone(),

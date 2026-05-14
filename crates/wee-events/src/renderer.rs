@@ -188,7 +188,7 @@ impl<S: Default, E> Renderer<S, E> {
             if let Some(reducer) = self.reducers.get(&event.event_type) {
                 reducer(&mut state, &event.event_type, &event.data).map_err(|source| {
                     RenderError::ApplyFailed {
-                        context: Box::new(RenderEventContext::new(aggregate, event)),
+                        context: Box::new(RenderEventContext::new(aggregate, event.as_ref())),
                         source,
                     }
                 })?;
@@ -204,7 +204,7 @@ impl<S: Default, E> Renderer<S, E> {
             {
                 reducer(&mut state, &event.event_type, &event.data).map_err(|source| {
                     RenderError::ApplyFailed {
-                        context: Box::new(RenderEventContext::new(aggregate, event)),
+                        context: Box::new(RenderEventContext::new(aggregate, event.as_ref())),
                         source,
                     }
                 })?;
@@ -218,7 +218,7 @@ impl<S: Default, E> Renderer<S, E> {
                 continue;
             }
             return Err(RenderError::UnhandledEventType {
-                context: Box::new(RenderEventContext::new(aggregate, event)),
+                context: Box::new(RenderEventContext::new(aggregate, event.as_ref())),
             });
         }
 
