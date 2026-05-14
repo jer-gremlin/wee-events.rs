@@ -2,6 +2,7 @@ use std::fmt;
 
 use crate::id::Revision;
 
+//TODO: @Kevin -- Are retries not a concern for the caller?
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetryDiagnostics {
     pub last_attempted_revision: Revision,

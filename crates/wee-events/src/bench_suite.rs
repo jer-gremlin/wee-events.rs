@@ -559,7 +559,7 @@ macro_rules! store_bench_suite {
     ($mod_name:ident, $levels:expr, $factory:expr) => {
         mod $mod_name {
             use super::*;
-            use criterion::{criterion_group, Criterion};
+            use criterion::{Criterion, criterion_group};
             use std::sync::Arc;
 
             fn store_benchmarks(c: &mut Criterion) {

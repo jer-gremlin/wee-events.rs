@@ -1,5 +1,5 @@
 //! Guarantee (crates/wee-events/src/id.rs:135-167): `AggregateId`'s
-//! `Display` and `FromStr` round-trip. 
+//! `Display` and `FromStr` round-trip.
 
 use std::str::FromStr;
 use wee_events::AggregateId;
