@@ -2802,20 +2802,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "restate-counter"
-version = "0.1.0"
-dependencies = [
- "restate-sdk",
- "serde",
- "serde_json",
- "tokio",
- "tracing-subscriber",
- "wee-events",
- "wee-events-restate",
- "wee-events-sqlite",
-]
-
-[[package]]
 name = "restate-sdk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
