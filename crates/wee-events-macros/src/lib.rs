@@ -90,13 +90,13 @@ pub fn derive_command(input: TokenStream) -> TokenStream {
 
         match &variant.fields {
             Fields::Unit => quote! {
-                Self::#variant_name => wee_events::CommandName::new(#command_name),
+                Self::#variant_name => wee_events::CommandName::new_const(#command_name),
             },
             Fields::Named(_) => quote! {
-                Self::#variant_name { .. } => wee_events::CommandName::new(#command_name),
+                Self::#variant_name { .. } => wee_events::CommandName::new_const(#command_name),
             },
             Fields::Unnamed(_) => quote! {
-                Self::#variant_name(..) => wee_events::CommandName::new(#command_name),
+                Self::#variant_name(..) => wee_events::CommandName::new_const(#command_name),
             },
         }
     });
@@ -150,13 +150,13 @@ pub fn derive_domain_event(input: TokenStream) -> TokenStream {
 
         match &variant.fields {
             Fields::Unit => quote! {
-                Self::#variant_name => wee_events::EventType::new(#event_type),
+                Self::#variant_name => wee_events::EventType::new_const(#event_type),
             },
             Fields::Named(_) => quote! {
-                Self::#variant_name { .. } => wee_events::EventType::new(#event_type),
+                Self::#variant_name { .. } => wee_events::EventType::new_const(#event_type),
             },
             Fields::Unnamed(_) => quote! {
-                Self::#variant_name(..) => wee_events::EventType::new(#event_type),
+                Self::#variant_name(..) => wee_events::EventType::new_const(#event_type),
             },
         }
     });

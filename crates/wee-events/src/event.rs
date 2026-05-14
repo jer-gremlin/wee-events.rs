@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 use crate::codec::{EventDecoder, EventEncoder};
@@ -6,6 +8,10 @@ use crate::id::{AggregateId, CorrelationId, EventId, EventType, Revision};
 /// Encoding-tagged payload. The store treats this as opaque bytes with an
 /// encoding discriminator — it never interprets the content.
 ///
+/// `encoding` is `Cow<'static, str>` — common values are `&'static str`
+/// constants (`"application/json"`, `"application/cbor"`) which avoid any
+/// allocation per event. Dynamic values from store row data become `Cow::Owned`.
+///
 /// Mirrors Go's `Data { Encoding, Data }` to support multiple encodings
 /// (JSON, protobuf, CBOR, encrypted payloads). Stores decompose this into
 /// separate columns/fields; full-struct JSON serialization (matching Go's
@@ -13,7 +19,7 @@ use crate::id::{AggregateId, CorrelationId, EventId, EventType, Revision};
 /// matters.
 #[derive(Debug, Clone)]
 pub struct EventData {
-    pub encoding: String,
+    pub encoding: Cow<'static, str>,
     pub data: Vec<u8>,
 }
 
@@ -60,7 +66,11 @@ impl EventData {
     }
 
     /// Creates an `EventData` from raw bytes with a given encoding.
-    pub fn raw(encoding: impl Into<String>, data: Vec<u8>) -> Self {
+    ///
+    /// Accepts `&'static str` (no alloc, becomes `Cow::Borrowed`) or
+    /// `String` (becomes `Cow::Owned`). Stores that read encoding from
+    /// row data pass `Cow::Owned(s)` directly.
+    pub fn raw(encoding: impl Into<Cow<'static, str>>, data: Vec<u8>) -> Self {
         Self {
             encoding: encoding.into(),
             data,
@@ -82,7 +92,7 @@ impl EventData {
         if !self.is_json() {
             return Err(DeserializeJsonError::EncodingMismatch {
                 expected: Self::JSON_ENCODING.to_string(),
-                actual: self.encoding.clone(),
+                actual: self.encoding.to_string(),
             });
         }
         crate::JsonDecoder
