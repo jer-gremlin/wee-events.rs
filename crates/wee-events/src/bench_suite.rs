@@ -19,14 +19,25 @@
 //! ```
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use criterion::Criterion;
-use futures::future::join_all;
 use tokio::runtime::Runtime;
+use tokio::sync::Barrier;
+use tokio::task::JoinSet;
 
 use crate::id::AggregateId;
 use crate::store::{EventStore, PublishOptions};
 use crate::test_suite::make_raw_events;
+
+/// Drives a `JoinSet` to completion, propagating panics. Replaces the prior
+/// `join_all(...)` pattern which polled all futures on a single task — i.e.
+/// not concurrent at all on a multi-thread runtime.
+async fn drain<T: 'static>(mut set: JoinSet<T>) {
+    while let Some(r) = set.join_next().await {
+        r.expect("benchmark task panicked");
+    }
+}
 
 /// Default concurrency levels for concurrent benchmarks.
 pub const CONCURRENCY_LEVELS: &[usize] = &[2, 4, 8, 16, 32];
@@ -102,25 +113,23 @@ pub fn bench_create_spread<S: EventStore + 'static>(
 ) {
     let mut group = c.benchmark_group(format!("{prefix}/creation/spread"));
     for &n in levels {
-        // Use a fresh batch of spread IDs per iteration via iter_batched.
         group.bench_function(format!("{n}"), |b| {
             b.to_async(rt).iter(|| {
                 let store = Arc::clone(store);
                 async move {
-                    let futs: Vec<_> = (0..n)
-                        .map(|i| {
-                            let store = Arc::clone(&store);
-                            async move {
-                                let id = make_spread_id(i);
-                                let (_, raw) = make_raw_events(1);
-                                store
-                                    .publish(&id, PublishOptions::default(), raw)
-                                    .await
-                                    .unwrap();
-                            }
-                        })
-                        .collect();
-                    join_all(futs).await;
+                    let mut set = JoinSet::new();
+                    for i in 0..n {
+                        let store = Arc::clone(&store);
+                        set.spawn(async move {
+                            let id = make_spread_id(i);
+                            let (_, raw) = make_raw_events(1);
+                            store
+                                .publish(&id, PublishOptions::default(), raw)
+                                .await
+                                .expect("publish should succeed in bench");
+                        });
+                    }
+                    drain(set).await;
                 }
             });
         });
@@ -143,20 +152,19 @@ pub fn bench_create_concentrated<S: EventStore + 'static>(
             b.to_async(rt).iter(|| {
                 let store = Arc::clone(store);
                 async move {
-                    let futs: Vec<_> = (0..n)
-                        .map(|_| {
-                            let store = Arc::clone(&store);
-                            async move {
-                                let id = make_concentrated_id();
-                                let (_, raw) = make_raw_events(1);
-                                store
-                                    .publish(&id, PublishOptions::default(), raw)
-                                    .await
-                                    .unwrap();
-                            }
-                        })
-                        .collect();
-                    join_all(futs).await;
+                    let mut set = JoinSet::new();
+                    for _ in 0..n {
+                        let store = Arc::clone(&store);
+                        set.spawn(async move {
+                            let id = make_concentrated_id();
+                            let (_, raw) = make_raw_events(1);
+                            store
+                                .publish(&id, PublishOptions::default(), raw)
+                                .await
+                                .expect("publish should succeed in bench");
+                        });
+                    }
+                    drain(set).await;
                 }
             });
         });
@@ -177,16 +185,31 @@ pub fn bench_publish_batch<S: EventStore>(
 ) {
     let mut group = c.benchmark_group(format!("{prefix}/steady_state/publish_batch"));
     for &batch_size in BATCH_SIZES {
-        let id = make_test_id();
-        seed_aggregate(rt, store, &id, 1);
-
         group.bench_function(format!("{batch_size}"), |b| {
-            b.to_async(rt).iter(|| async {
-                let (_, raw) = make_raw_events(batch_size);
-                store
-                    .publish(&id, PublishOptions::default(), raw)
-                    .await
-                    .unwrap();
+            // `iter_custom` so async setup is `.await`ed instead of
+            // `rt.block_on`'d (which would deadlock — the whole closure
+            // already runs inside Criterion's `rt.block_on`). Fresh
+            // aggregate per measurement iteration kills the monotonic
+            // growth that the old single-aggregate `iter` form had.
+            b.to_async(rt).iter_custom(|iters| async move {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let id = make_test_id();
+                    let (_, seed) = make_raw_events(1);
+                    store
+                        .publish(&id, PublishOptions::default(), seed)
+                        .await
+                        .expect("seed should succeed in bench");
+
+                    let (_, raw) = make_raw_events(batch_size);
+                    let start = Instant::now();
+                    store
+                        .publish(&id, PublishOptions::default(), raw)
+                        .await
+                        .expect("publish should succeed in bench");
+                    total += start.elapsed();
+                }
+                total
             });
         });
     }
@@ -200,20 +223,36 @@ pub fn bench_publish_with_revision<S: EventStore>(
     store: &S,
     prefix: &str,
 ) {
-    let id = make_test_id();
-    seed_aggregate(rt, store, &id, 1);
-
     c.bench_function(
         &format!("{prefix}/steady_state/publish_with_revision"),
         |b| {
-            b.to_async(rt).iter(|| async {
-                let agg = store.load(&id).await.unwrap();
-                let (_, raw) = make_raw_events(1);
-                let opts = PublishOptions {
-                    expected_revision: Some(agg.revision().clone()),
-                    ..Default::default()
-                };
-                store.publish(&id, opts, raw).await.unwrap();
+            // `iter_custom` — see `bench_publish_batch` for the rationale.
+            // Fresh aggregate per iter so the `load` step doesn't walk an
+            // ever-longer event stream.
+            b.to_async(rt).iter_custom(|iters| async move {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let id = make_test_id();
+                    let (_, seed) = make_raw_events(1);
+                    store
+                        .publish(&id, PublishOptions::default(), seed)
+                        .await
+                        .expect("seed should succeed in bench");
+
+                    let start = Instant::now();
+                    let agg = store.load(&id).await.expect("load should succeed in bench");
+                    let (_, raw) = make_raw_events(1);
+                    let opts = PublishOptions {
+                        expected_revision: Some(agg.revision().clone()),
+                        ..Default::default()
+                    };
+                    store
+                        .publish(&id, opts, raw)
+                        .await
+                        .expect("publish should succeed in bench");
+                    total += start.elapsed();
+                }
+                total
             });
         },
     );
@@ -226,16 +265,29 @@ pub fn bench_publish_append<S: EventStore>(
     store: &S,
     prefix: &str,
 ) {
-    let id = make_test_id();
-    seed_aggregate(rt, store, &id, 1);
-
     c.bench_function(&format!("{prefix}/steady_state/append"), |b| {
-        b.to_async(rt).iter(|| async {
-            let (_, raw) = make_raw_events(1);
-            store
-                .publish(&id, PublishOptions::default(), raw)
-                .await
-                .unwrap();
+        // `iter_custom` — see `bench_publish_batch` for the rationale.
+        // Fresh aggregate per iter so the timed publish always lands on an
+        // aggregate of length 1.
+        b.to_async(rt).iter_custom(|iters| async move {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                let id = make_test_id();
+                let (_, seed) = make_raw_events(1);
+                store
+                    .publish(&id, PublishOptions::default(), seed)
+                    .await
+                    .expect("seed should succeed in bench");
+
+                let (_, raw) = make_raw_events(1);
+                let start = Instant::now();
+                store
+                    .publish(&id, PublishOptions::default(), raw)
+                    .await
+                    .expect("publish should succeed in bench");
+                total += start.elapsed();
+            }
+            total
         });
     });
 }
@@ -285,31 +337,46 @@ pub fn bench_write_spread<S: EventStore + 'static>(
 ) {
     let mut group = c.benchmark_group(format!("{prefix}/partition_write/spread"));
     for &n in levels {
-        // Pre-provision: each aggregate in its own partition.
-        let ids: Vec<_> = (0..n).map(make_spread_id).collect();
-        for id in &ids {
-            seed_aggregate(rt, &**store, id, 10);
-        }
-
         group.bench_function(format!("{n}"), |b| {
-            b.to_async(rt).iter(|| {
-                let store = Arc::clone(store);
-                let ids = ids.clone();
+            // `iter_custom` + `JoinSet`:
+            //   setup (untimed) : build N fresh aggregates each seeded with 10 events
+            //   timed region    : `tokio::spawn` one publish per aggregate, drain
+            //
+            // The previous form pre-seeded once outside the bench and let
+            // every iter append to the SAME N aggregates — they grew to
+            // ~10k events apiece — while collecting futures into a `Vec` and
+            // `join_all`-ing them, which polls on one task (no parallelism).
+            let store = Arc::clone(store);
+            b.to_async(rt).iter_custom(move |iters| {
+                let store = Arc::clone(&store);
                 async move {
-                    let futs: Vec<_> = ids
-                        .into_iter()
-                        .map(|id| {
+                    let mut total = Duration::ZERO;
+                    for _ in 0..iters {
+                        let ids: Vec<AggregateId> = (0..n).map(make_spread_id).collect();
+                        for id in &ids {
+                            let (_, seed) = make_raw_events(10);
+                            store
+                                .publish(id, PublishOptions::default(), seed)
+                                .await
+                                .expect("seed should succeed in bench");
+                        }
+
+                        let start = Instant::now();
+                        let mut set = JoinSet::new();
+                        for id in ids {
                             let store = Arc::clone(&store);
-                            async move {
+                            set.spawn(async move {
                                 let (_, raw) = make_raw_events(1);
                                 store
                                     .publish(&id, PublishOptions::default(), raw)
                                     .await
-                                    .unwrap();
-                            }
-                        })
-                        .collect();
-                    join_all(futs).await;
+                                    .expect("publish should succeed in bench");
+                            });
+                        }
+                        drain(set).await;
+                        total += start.elapsed();
+                    }
+                    total
                 }
             });
         });
@@ -328,31 +395,41 @@ pub fn bench_write_concentrated<S: EventStore + 'static>(
 ) {
     let mut group = c.benchmark_group(format!("{prefix}/partition_write/concentrated"));
     for &n in levels {
-        // Pre-provision: all aggregates share the "concentrated" type.
-        let ids: Vec<_> = (0..n).map(|_| make_concentrated_id()).collect();
-        for id in &ids {
-            seed_aggregate(rt, &**store, id, 10);
-        }
-
         group.bench_function(format!("{n}"), |b| {
-            b.to_async(rt).iter(|| {
-                let store = Arc::clone(store);
-                let ids = ids.clone();
+            // Same `iter_custom` + `JoinSet` shape as `bench_write_spread`,
+            // except all aggregates share the "concentrated" type.
+            let store = Arc::clone(store);
+            b.to_async(rt).iter_custom(move |iters| {
+                let store = Arc::clone(&store);
                 async move {
-                    let futs: Vec<_> = ids
-                        .into_iter()
-                        .map(|id| {
+                    let mut total = Duration::ZERO;
+                    for _ in 0..iters {
+                        let ids: Vec<AggregateId> =
+                            (0..n).map(|_| make_concentrated_id()).collect();
+                        for id in &ids {
+                            let (_, seed) = make_raw_events(10);
+                            store
+                                .publish(id, PublishOptions::default(), seed)
+                                .await
+                                .expect("seed should succeed in bench");
+                        }
+
+                        let start = Instant::now();
+                        let mut set = JoinSet::new();
+                        for id in ids {
                             let store = Arc::clone(&store);
-                            async move {
+                            set.spawn(async move {
                                 let (_, raw) = make_raw_events(1);
                                 store
                                     .publish(&id, PublishOptions::default(), raw)
                                     .await
-                                    .unwrap();
-                            }
-                        })
-                        .collect();
-                    join_all(futs).await;
+                                    .expect("publish should succeed in bench");
+                            });
+                        }
+                        drain(set).await;
+                        total += start.elapsed();
+                    }
+                    total
                 }
             });
         });
@@ -370,25 +447,53 @@ pub fn bench_write_contention<S: EventStore + 'static>(
 ) {
     let mut group = c.benchmark_group(format!("{prefix}/partition_write/contention"));
     for &n in levels {
-        let id = make_test_id();
-        seed_aggregate(rt, &**store, &id, 1);
-
         group.bench_function(format!("{n}"), |b| {
-            b.to_async(rt).iter(|| {
-                let store = Arc::clone(store);
-                let id = id.clone();
+            // `iter_custom` + Barrier-gated `JoinSet`:
+            //   setup (untimed) : a fresh aggregate seeded with 1 event
+            //   timed region    : N writers spawn, all `.wait()` on a
+            //                     barrier, then publish simultaneously.
+            //                     Real contention on one aggregate.
+            //
+            // The previous form pre-seeded once (aggregate grew across the
+            // run) and used `join_all` which on a multi-thread runtime
+            // polls every future on one task — no actual parallelism.
+            // Errors were silently discarded via `let _ = …`.
+            let store = Arc::clone(store);
+            b.to_async(rt).iter_custom(move |iters| {
+                let store = Arc::clone(&store);
                 async move {
-                    let futs: Vec<_> = (0..n)
-                        .map(|_| {
+                    let mut total = Duration::ZERO;
+                    for _ in 0..iters {
+                        let id = make_test_id();
+                        let (_, seed) = make_raw_events(1);
+                        store
+                            .publish(&id, PublishOptions::default(), seed)
+                            .await
+                            .expect("seed should succeed in bench");
+
+                        let start = Instant::now();
+                        let barrier = Arc::new(Barrier::new(n));
+                        let mut set = JoinSet::new();
+                        for _ in 0..n {
                             let store = Arc::clone(&store);
                             let id = id.clone();
-                            async move {
+                            let barrier = Arc::clone(&barrier);
+                            set.spawn(async move {
+                                barrier.wait().await;
                                 let (_, raw) = make_raw_events(1);
-                                let _ = store.publish(&id, PublishOptions::default(), raw).await;
-                            }
-                        })
-                        .collect();
-                    join_all(futs).await;
+                                // No `expected_revision`: every writer can
+                                // commit; this measures pure publish-path
+                                // contention on the store's locks.
+                                store
+                                    .publish(&id, PublishOptions::default(), raw)
+                                    .await
+                                    .expect("publish should succeed in bench");
+                            });
+                        }
+                        drain(set).await;
+                        total += start.elapsed();
+                    }
+                    total
                 }
             });
         });
@@ -421,16 +526,14 @@ pub fn bench_read_spread<S: EventStore + 'static>(
                 let store = Arc::clone(store);
                 let ids = ids.clone();
                 async move {
-                    let futs: Vec<_> = ids
-                        .into_iter()
-                        .map(|id| {
-                            let store = Arc::clone(&store);
-                            async move {
-                                store.load(&id).await.unwrap();
-                            }
-                        })
-                        .collect();
-                    join_all(futs).await;
+                    let mut set = JoinSet::new();
+                    for id in ids {
+                        let store = Arc::clone(&store);
+                        set.spawn(async move {
+                            store.load(&id).await.expect("load should succeed in bench");
+                        });
+                    }
+                    drain(set).await;
                 }
             });
         });
@@ -459,16 +562,14 @@ pub fn bench_read_concentrated<S: EventStore + 'static>(
                 let store = Arc::clone(store);
                 let ids = ids.clone();
                 async move {
-                    let futs: Vec<_> = ids
-                        .into_iter()
-                        .map(|id| {
-                            let store = Arc::clone(&store);
-                            async move {
-                                store.load(&id).await.unwrap();
-                            }
-                        })
-                        .collect();
-                    join_all(futs).await;
+                    let mut set = JoinSet::new();
+                    for id in ids {
+                        let store = Arc::clone(&store);
+                        set.spawn(async move {
+                            store.load(&id).await.expect("load should succeed in bench");
+                        });
+                    }
+                    drain(set).await;
                 }
             });
         });
@@ -503,26 +604,23 @@ pub fn bench_mixed_read_write<S: EventStore + 'static>(
                 let store = Arc::clone(store);
                 let all_ids = all_ids.clone();
                 async move {
-                    let futs: Vec<_> = all_ids
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, id)| {
-                            let store = Arc::clone(&store);
-                            let is_reader = i % 2 == 0;
-                            async move {
-                                if is_reader {
-                                    store.load(&id).await.unwrap();
-                                } else {
-                                    let (_, raw) = make_raw_events(1);
-                                    store
-                                        .publish(&id, PublishOptions::default(), raw)
-                                        .await
-                                        .unwrap();
-                                }
+                    let mut set = JoinSet::new();
+                    for (i, id) in all_ids.into_iter().enumerate() {
+                        let store = Arc::clone(&store);
+                        let is_reader = i % 2 == 0;
+                        set.spawn(async move {
+                            if is_reader {
+                                store.load(&id).await.expect("load should succeed in bench");
+                            } else {
+                                let (_, raw) = make_raw_events(1);
+                                store
+                                    .publish(&id, PublishOptions::default(), raw)
+                                    .await
+                                    .expect("publish should succeed in bench");
                             }
-                        })
-                        .collect();
-                    join_all(futs).await;
+                        });
+                    }
+                    drain(set).await;
                 }
             });
         });
