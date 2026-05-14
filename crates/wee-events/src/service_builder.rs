@@ -45,9 +45,9 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 
+use crate::Command;
 use crate::entity::Entity;
 use crate::id::AggregateId;
-use crate::Command;
 
 // ---------------------------------------------------------------------------
 // Erased future type alias — BoxFuture for lifetime management only, not type erasure

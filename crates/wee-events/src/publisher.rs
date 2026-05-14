@@ -1,8 +1,8 @@
+use crate::EventEncoder;
 use crate::entity::Entity;
 use crate::event::{ChangeSet, DomainEvent};
 use crate::service::ServiceError;
 use crate::store::{EventStore, PublishOptions, RawEvent};
-use crate::EventEncoder;
 
 /// Publishes typed domain events for an aggregate entity.
 pub struct Publisher<'a, Store> {

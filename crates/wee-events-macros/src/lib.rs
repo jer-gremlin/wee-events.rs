@@ -6,7 +6,7 @@ mod service_macro;
 use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};
+use syn::{Data, DeriveInput, Fields, LitStr, parse_macro_input};
 
 /// Annotates an environment capability trait and emits adapter glue.
 ///

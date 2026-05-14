@@ -4,9 +4,9 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
+    Error, GenericArgument, ItemFn, Path, PathArguments, ReturnType, Token, Type,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Error, GenericArgument, ItemFn, Path, PathArguments, ReturnType, Token, Type,
 };
 
 // ---------------------------------------------------------------------------

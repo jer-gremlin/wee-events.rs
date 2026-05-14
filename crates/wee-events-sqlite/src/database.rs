@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use libsql::{Builder, Connection};
 
-use crate::{event_store::DatabaseTarget, Error};
+use crate::{Error, event_store::DatabaseTarget};
 
 const EVENT_STORE_SCHEMA_VERSION: u32 = 2;
 const DOCUMENT_STORE_SCHEMA_VERSION: u32 = 1;

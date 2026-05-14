@@ -2,10 +2,9 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    braced, bracketed,
+    Ident, LitStr, Path, Token, Visibility, braced, bracketed,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Ident, LitStr, Path, Token, Visibility,
 };
 
 // ---------------------------------------------------------------------------
