@@ -57,7 +57,7 @@ pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{Command, DomainEvent, capability, handler, loader, service};
 
 pub mod memory {
-    pub use crate::memory_store::{MemoryStore, MemoryStoreBacking, MemoryStoreError};
+    pub use crate::memory_store::{MemoryStore, MemoryStoreError};
 }
 
 #[cfg(any(test, feature = "testing"))]
