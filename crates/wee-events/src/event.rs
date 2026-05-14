@@ -123,11 +123,15 @@ pub struct EventMetadata {
 
 /// An atomic batch of events from a single publish call. Events within a
 /// changeset are applied together — all or nothing.
+///
+/// Events share storage with the store-side stream via `Arc` — both the
+/// `Aggregate` retained by the store and this `ChangeSet` returned to the
+/// caller point at the same allocations.
 #[derive(Debug, Clone)]
 pub struct ChangeSet {
     pub aggregate_id: AggregateId,
     pub revision: Revision,
-    pub events: Vec<RecordedEvent>,
+    pub events: Vec<std::sync::Arc<RecordedEvent>>,
 }
 
 /// Trait implemented by domain event enums. The derive macro generates this
