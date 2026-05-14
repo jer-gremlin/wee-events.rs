@@ -53,7 +53,7 @@ pub trait EventStore: Send + Sync {
 
 impl<T> EventStore for Arc<T>
 where
-    T: EventStore + ?Sized,
+    T: EventStore,
 {
     type Error = T::Error;
 
