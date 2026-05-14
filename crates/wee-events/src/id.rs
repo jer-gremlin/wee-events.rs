@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
@@ -8,8 +9,13 @@ const ZERO_REVISION: &str = "00000000000000000000000000";
 
 /// Generates the common boilerplate for an opaque string newtype identifier.
 ///
-/// Produces: struct definition with standard derives, `new()`, `as_str()`,
-/// `Display`, `From<String>`, `From<&str>`.
+/// Backed by `Cow<'static, str>` so `&'static str` literals (declared event
+/// types, command names) don't allocate when constructed via [`new_const`].
+/// Dynamic strings still flow through [`new`] / `From<String>` / `From<&str>`
+/// and become `Cow::Owned`.
+///
+/// Produces: struct definition with standard derives, `new()`, `new_const()`,
+/// `as_str()`, `Display`, `From<String>`, `From<&str>`.
 macro_rules! newtype_id {
     (
         $(#[$meta:meta])*
@@ -17,11 +23,19 @@ macro_rules! newtype_id {
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        $vis struct $name(String);
+        $vis struct $name(Cow<'static, str>);
 
         impl $name {
+            /// Constructs from an owned or borrowed string. Allocates if the
+            /// caller's lifetime isn't `'static`.
             pub fn new(s: impl Into<String>) -> Self {
-                Self(s.into())
+                Self(Cow::Owned(s.into()))
+            }
+
+            /// Zero-allocation constructor for compile-time-known names —
+            /// derive macros and well-known constants take this path.
+            pub const fn new_const(s: &'static str) -> Self {
+                Self(Cow::Borrowed(s))
             }
 
             pub fn as_str(&self) -> &str {
@@ -37,13 +51,13 @@ macro_rules! newtype_id {
 
         impl From<String> for $name {
             fn from(s: String) -> Self {
-                Self(s)
+                Self(Cow::Owned(s))
             }
         }
 
         impl From<&str> for $name {
             fn from(s: &str) -> Self {
-                Self(s.to_string())
+                Self(Cow::Owned(s.to_string()))
             }
         }
     };
