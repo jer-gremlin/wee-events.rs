@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 use wee_events::{
     Aggregate, AggregateId, DomainEvent, EventData, EventId, EventMetadata, EventType,

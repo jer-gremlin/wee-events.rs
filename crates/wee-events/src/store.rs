@@ -31,6 +31,19 @@ pub struct RawEvent {
 ///
 /// This trait is intended for static dispatch. Methods return `Send` futures so
 /// generated durable adapters can hold store references across async boundaries.
+///
+/// # Reentrancy
+///
+/// Implementations may hold internal locks (mutexes, async mutexes, connection
+/// pool slots) while executing `load` / `publish`. A handler invoked while one
+/// of these methods is in-flight **must not call back into the same store**
+/// instance, or it will deadlock. The framework dispatches handlers between
+/// store calls, never inside them; this invariant is load-bearing.
+///
+/// If reentrancy is required (e.g. composing a saga that publishes to another
+/// aggregate from within a handler), use a separate store handle or a
+/// dedicated reentrant primitive — do not rely on the public surface of an
+/// implementation being reentrant by default.
 pub trait EventStore: Send + Sync {
     type Error: From<crate::Error>
         + From<serde_json::Error>
@@ -41,7 +54,7 @@ pub trait EventStore: Send + Sync {
         + 'static;
 
     fn load(&self, id: &AggregateId)
-        -> impl Future<Output = Result<Aggregate, Self::Error>> + Send;
+    -> impl Future<Output = Result<Aggregate, Self::Error>> + Send;
 
     fn publish(
         &self,

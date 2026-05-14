@@ -1,6 +1,6 @@
 use wee_events::{
-    memory::MemoryStore, AggregateId, AggregateType, EventData, EventStore, EventType,
-    PublishOptions, RawEvent,
+    AggregateId, AggregateType, EventData, EventStore, EventType, PublishOptions, RawEvent,
+    memory::MemoryStore,
 };
 
 fn make_event() -> RawEvent {
