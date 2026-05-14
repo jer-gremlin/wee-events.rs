@@ -88,7 +88,7 @@ fn hash_aggregate_id(aggregate_id: &AggregateId) -> u32 {
         .aggregate_type()
         .as_str()
         .bytes()
-        .chain([b':'])
+        .chain(*b":")
         .chain(aggregate_id.aggregate_key().bytes())
     {
         hash ^= u32::from(byte);

@@ -41,7 +41,7 @@ pub trait EventStore: Send + Sync {
         + 'static;
 
     fn load(&self, id: &AggregateId)
-        -> impl Future<Output = Result<Aggregate, Self::Error>> + Send;
+    -> impl Future<Output = Result<Aggregate, Self::Error>> + Send;
 
     fn publish(
         &self,

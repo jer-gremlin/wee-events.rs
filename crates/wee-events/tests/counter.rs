@@ -3,9 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 use wee_events::{
-    memory::{MemoryStore, MemoryStoreError},
     AggregateId, Command, DomainEvent, Entity, EventData, EventStore, EventStoreErrorExt,
     EventType, PublishOptions, Renderer,
+    memory::{MemoryStore, MemoryStoreError},
 };
 
 // ---------------------------------------------------------------------------

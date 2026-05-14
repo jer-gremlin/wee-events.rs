@@ -75,8 +75,8 @@ impl<T: TursoPlatformApi> TursoPlatformApi for std::sync::Arc<T> {
 pub(crate) mod fake {
     use super::*;
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// In-memory fake that tracks databases and call counts.
     pub(crate) struct FakeTursoPlatformApi {

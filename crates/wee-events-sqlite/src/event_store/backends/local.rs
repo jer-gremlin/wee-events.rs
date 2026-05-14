@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use data_encoding::BASE32_NOPAD;
 use libsql::Connection;
 
-use crate::{database, Error};
+use crate::{Error, database};
 
 use super::super::partitioning::PartitionCatalog;
 use super::super::store::LocalBackend;
@@ -36,7 +36,7 @@ where
                         return Err(Error::Configuration(
                             "named local partition strategy returned the default partition"
                                 .to_string(),
-                        ))
+                        ));
                     }
                 };
                 Ok(self

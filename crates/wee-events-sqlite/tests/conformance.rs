@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
 use testcontainers::{
+    ContainerAsync, GenericImage, ImageExt,
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
-    ContainerAsync, GenericImage, ImageExt,
 };
 use tokio::sync::OnceCell;
 use tokio::time::sleep;

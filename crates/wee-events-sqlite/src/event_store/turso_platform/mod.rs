@@ -7,8 +7,8 @@ use std::sync::Mutex;
 
 use futures_util::future::try_join_all;
 
-use crate::database;
 use crate::Error;
+use crate::database;
 use api::{ApiError, DatabaseInfo, TursoPlatformApi};
 use sanitize::{named_database_prefix, sanitize_database_name};
 
@@ -424,8 +424,8 @@ impl<A: TursoPlatformApi, M: PartitionMetadataStore> TursoProvisioner
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use api::fake::FakeTursoPlatformApi;
@@ -588,11 +588,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(api
-            .get_database(&sanitize_database_name("Tenant:ACME", "myapp"))
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            api.get_database(&sanitize_database_name("Tenant:ACME", "myapp"))
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -714,9 +715,11 @@ mod tests {
             .await
             .expect_err("missing metadata should fail");
 
-        assert!(error
-            .to_string()
-            .contains("missing logical partition metadata"));
+        assert!(
+            error
+                .to_string()
+                .contains("missing logical partition metadata")
+        );
     }
 
     #[tokio::test]
