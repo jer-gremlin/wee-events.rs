@@ -64,6 +64,16 @@ pub trait EventStore: Send + Sync {
     ) -> impl Future<Output = Result<ChangeSet, Self::Error>> + Send;
 }
 
+/// Blanket impl so `Arc<Store>` can be passed wherever `impl EventStore`
+/// is expected. Useful for stores whose internals are **not** themselves
+/// cheaply cloneable (e.g. concrete `SqliteEventStore`, which holds
+/// async mutexes + connection pools).
+///
+/// **Footgun:** if your store implementation is `Clone` (with a cheap
+/// internal `Arc`, like [`crate::memory::MemoryStore`]), prefer
+/// `store.clone()` over `Arc::new(store)`. Wrapping a `Clone` store in
+/// `Arc` produces `Arc<Arc<Inner>>` — two indirections per access and two
+/// atomic increments per clone, with no observable benefit.
 impl<T> EventStore for Arc<T>
 where
     T: EventStore,

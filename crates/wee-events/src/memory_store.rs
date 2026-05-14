@@ -41,28 +41,28 @@ impl From<serde_json::Error> for MemoryStoreError {
 ///
 /// Uses a monotonic ULID generator — guarantees strictly increasing
 /// revisions even within the same millisecond.
+///
+/// `MemoryStore` is `Clone`: cloning bumps an internal `Arc` and produces a
+/// second handle pointing at the same underlying state. Use this when a test
+/// needs to exercise multiple store instances backed by one logical
+/// persistence layer.
 #[derive(Clone)]
 pub struct MemoryStore {
     backing: Arc<MemoryStoreBacking>,
 }
 
-/// Shared backing state for one or more [`MemoryStore`] handles.
-///
-/// Multiple stores created with the same backing observe the same aggregate
-/// streams and revision generator, which is useful for contract tests that
-/// exercise multiple store instances over one logical persistence layer.
-pub struct MemoryStoreBacking {
+/// Shared backing state behind a [`MemoryStore`]. Private — clone the store
+/// itself to share its state with another handle.
+struct MemoryStoreBacking {
     streams: Mutex<HashMap<AggregateId, Vec<Arc<RecordedEvent>>>>,
     generator: Mutex<Generator>,
 }
 
 impl MemoryStore {
     pub fn new() -> Self {
-        Self::from_shared(Arc::new(MemoryStoreBacking::new()))
-    }
-
-    pub fn from_shared(backing: Arc<MemoryStoreBacking>) -> Self {
-        Self { backing }
+        Self {
+            backing: Arc::new(MemoryStoreBacking::new()),
+        }
     }
 
     /// Mints `count` paired `(EventId, Revision)` ULIDs in a single
@@ -186,7 +186,7 @@ impl Default for MemoryStore {
 }
 
 impl MemoryStoreBacking {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             streams: Mutex::new(HashMap::new()),
             generator: Mutex::new(Generator::new()),
