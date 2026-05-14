@@ -712,9 +712,33 @@ macro_rules! store_bench_suite {
 
                 // Mixed workload
                 $crate::testing::bench_mixed_read_write(c, &rt, &store_arc, prefix, levels);
+
+                // Drop the store handle BEFORE the runtime so any background
+                // refcount work happens while the runtime is still alive.
+                drop(store_arc);
+
+                // Force-shutdown the tokio runtime with a bounded wait. The
+                // implicit `Runtime::drop` will block indefinitely waiting on
+                // worker-thread joins after a benchmark session that has
+                // spawned many `JoinSet` tasks (observed deadlock at 0% CPU
+                // after the final bench). `shutdown_timeout` aborts cleanly
+                // and lets the bench binary exit.
+                rt.shutdown_timeout(::core::time::Duration::from_secs(1));
             }
 
-            criterion_group!(benches, store_benchmarks);
+            // Bounded cost: 20 samples per bench, 1s warm-up + 5s
+            // measurement, so a full suite caps at ~35 benches × ~7 s ≈ 4
+            // min on a quiet box. Criterion's defaults (100 samples / 5 s
+            // measurement) regularly blow past 30 min for the contention
+            // and mixed groups.
+            criterion_group! {
+                name = benches;
+                config = Criterion::default()
+                    .sample_size(20)
+                    .measurement_time(::core::time::Duration::from_secs(5))
+                    .warm_up_time(::core::time::Duration::from_secs(1));
+                targets = store_benchmarks
+            }
         }
     };
 }
