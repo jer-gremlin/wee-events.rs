@@ -531,13 +531,13 @@ where
                 }));
             }
 
-            recorded.push(RecordedEvent {
+            recorded.push(std::sync::Arc::new(RecordedEvent {
                 event_id,
                 event_type: raw.event_type.clone(),
                 revision: Revision::new(revision),
                 metadata: metadata.clone(),
                 data: raw.data.clone(),
-            });
+            }));
         }
 
         tx.commit().await.map_err(Error::from)?;
