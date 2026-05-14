@@ -5,8 +5,6 @@ members = [
     "crates/wee-events",
     "crates/wee-events-sqlite",
     "crates/wee-events-restate",
-    "crates/sins",
-    "examples/restate-counter",
 ]
 exclude = ["examples/coroutine-door"]
 
