@@ -102,7 +102,7 @@ impl EventDecoder for JsonDecoder {
         if data.encoding != Self::ENCODING {
             return Err(DecodeError::EncodingMismatch {
                 expected: Self::ENCODING.to_string(),
-                actual: data.encoding.clone(),
+                actual: data.encoding.to_string(),
             });
         }
 
@@ -133,7 +133,7 @@ impl EventDecoder for CborDecoder {
         if data.encoding != Self::ENCODING {
             return Err(DecodeError::EncodingMismatch {
                 expected: Self::ENCODING.to_string(),
-                actual: data.encoding.clone(),
+                actual: data.encoding.to_string(),
             });
         }
 
@@ -205,7 +205,7 @@ impl DecoderList for Nil {
         T: DeserializeOwned,
     {
         Err(DecodeError::UnknownEncoding {
-            encoding: data.encoding.clone(),
+            encoding: data.encoding.to_string(),
         })
     }
 }
