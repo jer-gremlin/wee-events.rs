@@ -682,47 +682,74 @@ macro_rules! store_bench_suite {
 
             fn store_benchmarks(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                let store = rt.block_on(async { $factory });
-                let store_arc = Arc::new(store);
-                let store_ref = &*store_arc;
                 let prefix = stringify!($mod_name);
                 let levels: &[usize] = $levels;
 
+                // ─── Per-group fresh store ──────────────────────────────────
+                // Each block constructs its own store from `$factory`, runs
+                // one group of benches, then drops the store at the closing
+                // brace. Without this, every bench writes into one shared
+                // store; cumulative state grows into tens of millions of
+                // events (multi-GB heap) by the time the last group runs,
+                // and the post-suite deallocation can take many minutes —
+                // observed as an apparent hang.
+                //
+                // Implicit contract: `$factory` must be safely re-evaluable.
+                // `MemoryStore::new()` and similar are trivially fine; a
+                // factory that allocates a real on-disk file (e.g. a SQLite
+                // store at a fixed path) needs to use a unique path per call
+                // or this will collide.
+                // ────────────────────────────────────────────────────────────
+
                 // Creation
-                $crate::testing::bench_create_aggregate(c, &rt, store_ref, prefix);
-                $crate::testing::bench_create_spread(c, &rt, &store_arc, prefix, levels);
-                $crate::testing::bench_create_concentrated(c, &rt, &store_arc, prefix, levels);
+                {
+                    let store_arc = Arc::new(rt.block_on(async { $factory }));
+                    let store_ref = &*store_arc;
+                    $crate::testing::bench_create_aggregate(c, &rt, store_ref, prefix);
+                    $crate::testing::bench_create_spread(c, &rt, &store_arc, prefix, levels);
+                    $crate::testing::bench_create_concentrated(c, &rt, &store_arc, prefix, levels);
+                }
 
                 // Steady-state writes
-                $crate::testing::bench_publish_batch(c, &rt, store_ref, prefix);
-                $crate::testing::bench_publish_with_revision(c, &rt, store_ref, prefix);
-                $crate::testing::bench_publish_append(c, &rt, store_ref, prefix);
+                {
+                    let store_arc = Arc::new(rt.block_on(async { $factory }));
+                    let store_ref = &*store_arc;
+                    $crate::testing::bench_publish_batch(c, &rt, store_ref, prefix);
+                    $crate::testing::bench_publish_with_revision(c, &rt, store_ref, prefix);
+                    $crate::testing::bench_publish_append(c, &rt, store_ref, prefix);
+                }
 
                 // Load scaling
-                $crate::testing::bench_load_scaling(c, &rt, store_ref, prefix);
+                {
+                    let store_arc = Arc::new(rt.block_on(async { $factory }));
+                    let store_ref = &*store_arc;
+                    $crate::testing::bench_load_scaling(c, &rt, store_ref, prefix);
+                }
 
                 // Partition write patterns
-                $crate::testing::bench_write_spread(c, &rt, &store_arc, prefix, levels);
-                $crate::testing::bench_write_concentrated(c, &rt, &store_arc, prefix, levels);
-                $crate::testing::bench_write_contention(c, &rt, &store_arc, prefix, levels);
+                {
+                    let store_arc = Arc::new(rt.block_on(async { $factory }));
+                    $crate::testing::bench_write_spread(c, &rt, &store_arc, prefix, levels);
+                    $crate::testing::bench_write_concentrated(c, &rt, &store_arc, prefix, levels);
+                    $crate::testing::bench_write_contention(c, &rt, &store_arc, prefix, levels);
+                }
 
                 // Partition read patterns
-                $crate::testing::bench_read_spread(c, &rt, &store_arc, prefix, levels);
-                $crate::testing::bench_read_concentrated(c, &rt, &store_arc, prefix, levels);
+                {
+                    let store_arc = Arc::new(rt.block_on(async { $factory }));
+                    $crate::testing::bench_read_spread(c, &rt, &store_arc, prefix, levels);
+                    $crate::testing::bench_read_concentrated(c, &rt, &store_arc, prefix, levels);
+                }
 
                 // Mixed workload
-                $crate::testing::bench_mixed_read_write(c, &rt, &store_arc, prefix, levels);
+                {
+                    let store_arc = Arc::new(rt.block_on(async { $factory }));
+                    $crate::testing::bench_mixed_read_write(c, &rt, &store_arc, prefix, levels);
+                }
 
-                // Drop the store handle BEFORE the runtime so any background
-                // refcount work happens while the runtime is still alive.
-                drop(store_arc);
-
-                // Force-shutdown the tokio runtime with a bounded wait. The
-                // implicit `Runtime::drop` will block indefinitely waiting on
-                // worker-thread joins after a benchmark session that has
-                // spawned many `JoinSet` tasks (observed deadlock at 0% CPU
-                // after the final bench). `shutdown_timeout` aborts cleanly
-                // and lets the bench binary exit.
+                // Bounded runtime shutdown — see the original commit for
+                // rationale. With per-group store drops above, the heap at
+                // this point should be tiny.
                 rt.shutdown_timeout(::core::time::Duration::from_secs(1));
             }
 
