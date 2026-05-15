@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use ulid::Generator;
 
 use crate::aggregate::Aggregate;
@@ -55,8 +55,10 @@ pub struct MemoryStore {
 
 /// Shared backing state behind a [`MemoryStore`]. Private — clone the store
 /// itself to share its state with another handle.
+type Stream = Arc<RwLock<Vec<Arc<RecordedEvent>>>>;
+
 struct MemoryStoreBacking {
-    streams: DashMap<AggregateId, Vec<Arc<RecordedEvent>>>,
+    streams: DashMap<AggregateId, Stream>,
     generator: Mutex<Generator>,
 }
 
@@ -87,14 +89,22 @@ impl MemoryStore {
         Ok(out)
     }
 
-    /// Synchronous load helper. The per-shard read guard from `DashMap`
-    /// never crosses an `.await`.
+    /// Synchronous load helper. Briefly holds the DashMap shard read lock to
+    /// clone the per-aggregate `Arc<RwLock<…>>`; the per-aggregate read guard
+    /// is taken after the shard lock is released, so concurrent loads of
+    /// shard-mate aggregates never wait on each other's writes.
     fn load_sync(&self, id: &AggregateId) -> Aggregate {
-        match self.backing.streams.get(id) {
-            Some(entry) if !entry.is_empty() => {
-                Aggregate::from_shared_events(id.clone(), entry.clone())
+        let stream = self.backing.streams.get(id).map(|e| Arc::clone(e.value()));
+        match stream {
+            Some(stream) => {
+                let events = stream.read();
+                if events.is_empty() {
+                    Aggregate::empty(id.clone())
+                } else {
+                    Aggregate::from_shared_events(id.clone(), events.clone())
+                }
             }
-            _ => Aggregate::empty(id.clone()),
+            None => Aggregate::empty(id.clone()),
         }
     }
 
@@ -137,18 +147,38 @@ impl MemoryStore {
             .revision
             .clone();
 
-        let mut entry = self
-            .backing
-            .streams
-            .entry(aggregate_id.clone())
-            .or_default();
+        // Resolve the per-aggregate stream. If the aggregate doesn't exist
+        // yet and the caller demanded a non-zero expected_revision, fail
+        // *before* inserting an empty entry — otherwise a failed publish
+        // leaves a phantom aggregate visible to `enumerate_aggregates()`.
+        let stream = match self.backing.streams.get(aggregate_id) {
+            Some(e) => Arc::clone(e.value()),
+            None => {
+                if let Some(expected) = &options.expected_revision {
+                    if !expected.is_zero() {
+                        return Err(MemoryStoreError::WeeEvents(
+                            crate::Error::RevisionConflict {
+                                expected: expected.clone(),
+                                actual: Revision::zero(),
+                            },
+                        ));
+                    }
+                }
+                self.stream_for(aggregate_id)
+            }
+        };
+        let mut events_guard = stream.write();
 
+        // Re-check after acquiring the inner lock — closes the TOCTOU window
+        // between the `get`/`stream_for` above and the write guard here.
         if let Some(expected) = &options.expected_revision {
-            let actual = entry
-                .last()
-                .map(|e| e.revision.clone())
-                .unwrap_or_else(Revision::zero);
-            if *expected != actual {
+            let actual_ref: Option<&Revision> = events_guard.last().map(|e| &e.revision);
+            let matches = match actual_ref {
+                Some(r) => r == expected,
+                None => expected.is_zero(),
+            };
+            if !matches {
+                let actual = actual_ref.cloned().unwrap_or_else(Revision::zero);
                 return Err(MemoryStoreError::WeeEvents(
                     crate::Error::RevisionConflict {
                         expected: expected.clone(),
@@ -158,7 +188,7 @@ impl MemoryStore {
             }
         }
 
-        entry.extend(recorded.iter().cloned());
+        events_guard.extend(recorded.iter().cloned());
 
         Ok(ChangeSet {
             aggregate_id: aggregate_id.clone(),
@@ -168,11 +198,26 @@ impl MemoryStore {
     }
 
     fn current_revision_sync(&self, id: &AggregateId) -> Revision {
-        self.backing
-            .streams
-            .get(id)
-            .and_then(|entry| entry.last().map(|e| e.revision.clone()))
+        let stream = self.backing.streams.get(id).map(|e| Arc::clone(e.value()));
+        stream
+            .and_then(|s| s.read().last().map(|e| e.revision.clone()))
             .unwrap_or_else(Revision::zero)
+    }
+
+    /// Returns the per-aggregate `Arc<RwLock<…>>`, inserting an empty one if
+    /// none exists. Shard write lock is held only for the brief
+    /// `entry().or_insert_with()` call.
+    fn stream_for(&self, id: &AggregateId) -> Stream {
+        if let Some(existing) = self.backing.streams.get(id) {
+            return Arc::clone(existing.value());
+        }
+        Arc::clone(
+            self.backing
+                .streams
+                .entry(id.clone())
+                .or_insert_with(|| Arc::new(RwLock::new(Vec::new())))
+                .value(),
+        )
     }
 }
 

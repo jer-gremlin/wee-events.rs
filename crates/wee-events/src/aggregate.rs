@@ -39,10 +39,10 @@ impl Aggregate {
     /// when the caller (e.g. an in-memory store) already holds `Arc`-wrapped
     /// events — no allocation occurs.
     pub fn from_shared_events(id: AggregateId, events: Vec<Arc<RecordedEvent>>) -> Self {
-        let revision = events
-            .last()
-            .map(|e| e.revision.clone())
-            .unwrap_or_else(Revision::zero);
+        let revision = match events.last() {
+            Some(e) => e.revision.clone(),
+            None => Revision::zero(),
+        };
         Self {
             id,
             events,
