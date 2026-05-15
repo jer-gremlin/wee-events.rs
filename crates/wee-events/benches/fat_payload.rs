@@ -81,11 +81,7 @@ fn bench_load(c: &mut Criterion, rt: &Runtime, size_label: &str, blob_size: usiz
         let store = MemoryStore::new();
         let id = AggregateId::new("user", "load-target");
         store
-            .publish(
-                &id,
-                PublishOptions::default(),
-                vec![make_raw(blob_size, 1)],
-            )
+            .publish(&id, PublishOptions::default(), vec![make_raw(blob_size, 1)])
             .await
             .expect("seed should succeed");
         Arc::new(store)
