@@ -12,10 +12,12 @@ readme.workspace = true
 bench = false
 
 [features]
+default = []
+cbor = ["dep:ciborium"]
 testing = ["dep:criterion", "dep:tokio", "dep:futures"]
 
 [dependencies]
-ciborium = { workspace = true }
+ciborium = { workspace = true, optional = true }
 criterion = { version = "0.5", features = ["async_tokio"], optional = true }
 futures = { version = "0.3", optional = true }
 serde = { workspace = true }

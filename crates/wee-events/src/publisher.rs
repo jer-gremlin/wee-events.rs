@@ -1,4 +1,3 @@
-use crate::EventEncoder;
 use crate::entity::Entity;
 use crate::event::{ChangeSet, DomainEvent};
 use crate::service::ServiceError;
@@ -27,13 +26,13 @@ where
     where
         E: DomainEvent,
     {
-        let encoder = self.store.event_encoder();
+        let encoding = self.store.encoding();
         let raw_events = events
             .iter()
             .map(|event| {
                 Ok(RawEvent {
                     event_type: event.event_type(),
-                    data: encoder.serialize(event)?,
+                    data: encoding.encode(event)?,
                 })
             })
             .collect::<Result<Vec<_>, crate::EncodeError>>()?;

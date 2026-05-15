@@ -139,7 +139,6 @@ async fn enumerate_after_restart_uses_logical_partition_name_not_backend_name() 
         .strategy(PartitionByStrategy::new(
             partition_by_tenant as fn(&AggregateId) -> String,
         ))
-        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .expect("store should open");
@@ -163,7 +162,6 @@ async fn enumerate_after_restart_uses_logical_partition_name_not_backend_name() 
         .strategy(PartitionByStrategy::new(
             partition_by_tenant as fn(&AggregateId) -> String,
         ))
-        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .expect("store should reopen");
@@ -186,7 +184,6 @@ async fn rejects_distinct_logical_partitions_that_alias_to_the_same_target() {
     let store = SqliteEventStore::builder()
         .sqld_namespaced(provisioner)
         .strategy(TypeStrategy)
-        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .expect("store should open");
