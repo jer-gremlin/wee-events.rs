@@ -249,6 +249,7 @@ impl EventStore for MemoryStore {
 }
 
 impl crate::EncodesEvents for MemoryStore {
+    #[inline]
     fn encoding(&self) -> crate::Encoding {
         crate::Encoding::Json
     }

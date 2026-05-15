@@ -908,6 +908,7 @@ where
     S: PartitionStrategy,
     C: PartitionCatalog<S::Partition>,
 {
+    #[inline]
     fn encoding(&self) -> Encoding {
         self.encoding
     }

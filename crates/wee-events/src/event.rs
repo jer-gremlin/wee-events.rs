@@ -61,8 +61,12 @@ impl EventData {
     pub const JSON_ENCODING: &'static str = "application/json";
 
     /// Creates an `EventData` from a JSON-serializable value.
+    #[inline]
     pub fn json<T: Serialize>(value: &T) -> Result<Self, crate::EncodeError> {
-        Encoding::Json.encode(value)
+        Ok(Self {
+            encoding: Cow::Borrowed(crate::codec::json::ENCODING),
+            data: serde_json::to_vec(value)?,
+        })
     }
 
     /// Creates an `EventData` from raw bytes with a given encoding.

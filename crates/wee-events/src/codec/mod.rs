@@ -32,6 +32,7 @@ pub enum Encoding {
 
 impl Encoding {
     /// The MIME-style identifier written into [`EventData::encoding`].
+    #[inline]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Encoding::Json => json::ENCODING,
@@ -43,6 +44,7 @@ impl Encoding {
     /// Resolves an encoding identifier from a payload.
     ///
     /// Returns [`DecodeError::UnknownEncoding`] if no enabled encoding matches.
+    #[inline]
     pub fn from_encoding_str(s: &str) -> Result<Self, DecodeError> {
         if s == json::ENCODING {
             return Ok(Encoding::Json);
@@ -57,6 +59,7 @@ impl Encoding {
     }
 
     /// Encodes a value via the selected encoding.
+    #[inline]
     pub fn encode<T>(&self, value: &T) -> Result<EventData, EncodeError>
     where
         T: Serialize,
@@ -72,6 +75,7 @@ impl Encoding {
     ///
     /// Returns [`DecodeError::EncodingMismatch`] if `data.encoding` doesn't
     /// match this variant.
+    #[inline]
     pub fn decode<T>(&self, data: &EventData) -> Result<T, DecodeError>
     where
         T: DeserializeOwned,

@@ -14,6 +14,7 @@ pub struct Decoder;
 impl EventEncoder for Encoder {
     const ENCODING: &'static str = ENCODING;
 
+    #[inline]
     fn serialize<T>(&self, value: &T) -> Result<EventData, EncodeError>
     where
         T: Serialize,
@@ -27,6 +28,7 @@ impl EventEncoder for Encoder {
 impl EventDecoder for Decoder {
     const ENCODING: &'static str = ENCODING;
 
+    #[inline]
     fn deserialize<T>(&self, data: &EventData) -> Result<T, DecodeError>
     where
         T: DeserializeOwned,
