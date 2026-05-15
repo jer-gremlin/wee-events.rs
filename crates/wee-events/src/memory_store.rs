@@ -1,5 +1,7 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use dashmap::DashMap;
+use parking_lot::Mutex;
 use ulid::Generator;
 
 use crate::aggregate::Aggregate;
@@ -54,7 +56,7 @@ pub struct MemoryStore {
 /// Shared backing state behind a [`MemoryStore`]. Private — clone the store
 /// itself to share its state with another handle.
 struct MemoryStoreBacking {
-    streams: Mutex<HashMap<AggregateId, Vec<Arc<RecordedEvent>>>>,
+    streams: DashMap<AggregateId, Vec<Arc<RecordedEvent>>>,
     generator: Mutex<Generator>,
 }
 
@@ -67,13 +69,9 @@ impl MemoryStore {
 
     /// Mints `count` paired `(EventId, Revision)` ULIDs in a single
     /// acquisition of the generator lock. Generator lock is released before
-    /// the caller touches the streams lock — no lock-in-lock ordering.
+    /// the caller touches the streams shard — no lock-in-lock ordering.
     fn mint_event_ids(&self, count: usize) -> Result<Vec<(EventId, Revision)>, MemoryStoreError> {
-        let mut generator = self
-            .backing
-            .generator
-            .lock()
-            .expect("ULID generator mutex poisoned");
+        let mut generator = self.backing.generator.lock();
         let mut out = Vec::with_capacity(count);
         for _ in 0..count {
             let event_id = generator
@@ -89,24 +87,20 @@ impl MemoryStore {
         Ok(out)
     }
 
-    /// Synchronous load helper. Factored out of [`EventStore::load`] so the
-    /// `std::sync::MutexGuard` cannot cross an `.await` point — adding `.await`
-    /// to the async wrapper does not risk the guard surviving across it,
-    /// because the guard never escapes this function.
+    /// Synchronous load helper. The per-shard read guard from `DashMap`
+    /// never crosses an `.await`.
     fn load_sync(&self, id: &AggregateId) -> Aggregate {
-        let streams = self.backing.streams.lock().expect("streams mutex poisoned");
-        match streams.get(id) {
-            Some(events) if !events.is_empty() => {
-                // Vec<Arc<_>>::clone is N refcount bumps, not N deep copies.
-                Aggregate::from_shared_events(id.clone(), events.clone())
+        match self.backing.streams.get(id) {
+            Some(entry) if !entry.is_empty() => {
+                Aggregate::from_shared_events(id.clone(), entry.clone())
             }
             _ => Aggregate::empty(id.clone()),
         }
     }
 
-    /// Synchronous publish helper. Same guard-scoping rationale as
-    /// [`Self::load_sync`]: streams lock never crosses an `.await`.
-    /// Caller has already minted ULIDs via [`Self::mint_event_ids`].
+    /// Synchronous publish helper. Acquires only the per-shard write guard
+    /// for `aggregate_id`; concurrent publishes to other aggregates land on
+    /// different shards and don't contend.
     fn publish_sync(
         &self,
         aggregate_id: &AggregateId,
@@ -114,24 +108,6 @@ impl MemoryStore {
         events: Vec<RawEvent>,
         minted: Vec<(EventId, Revision)>,
     ) -> Result<ChangeSet, MemoryStoreError> {
-        let mut streams = self.backing.streams.lock().expect("streams mutex poisoned");
-        let existing = streams.entry(aggregate_id.clone()).or_default();
-
-        if let Some(expected) = &options.expected_revision {
-            let actual = existing
-                .last()
-                .map(|e| e.revision.clone())
-                .unwrap_or_else(Revision::zero);
-            if *expected != actual {
-                return Err(MemoryStoreError::WeeEvents(
-                    crate::Error::RevisionConflict {
-                        expected: expected.clone(),
-                        actual,
-                    },
-                ));
-            }
-        }
-
         let metadata = EventMetadata {
             causation_id: options.causation_id,
             correlation_id: options.correlation_id,
@@ -160,7 +136,29 @@ impl MemoryStore {
             .expect("recorded is non-empty: events.is_empty() was false")
             .revision
             .clone();
-        existing.extend(recorded.iter().cloned());
+
+        let mut entry = self
+            .backing
+            .streams
+            .entry(aggregate_id.clone())
+            .or_default();
+
+        if let Some(expected) = &options.expected_revision {
+            let actual = entry
+                .last()
+                .map(|e| e.revision.clone())
+                .unwrap_or_else(Revision::zero);
+            if *expected != actual {
+                return Err(MemoryStoreError::WeeEvents(
+                    crate::Error::RevisionConflict {
+                        expected: expected.clone(),
+                        actual,
+                    },
+                ));
+            }
+        }
+
+        entry.extend(recorded.iter().cloned());
 
         Ok(ChangeSet {
             aggregate_id: aggregate_id.clone(),
@@ -170,11 +168,10 @@ impl MemoryStore {
     }
 
     fn current_revision_sync(&self, id: &AggregateId) -> Revision {
-        let streams = self.backing.streams.lock().expect("streams mutex poisoned");
-        streams
+        self.backing
+            .streams
             .get(id)
-            .and_then(|v| v.last())
-            .map(|e| e.revision.clone())
+            .and_then(|entry| entry.last().map(|e| e.revision.clone()))
             .unwrap_or_else(Revision::zero)
     }
 }
@@ -188,7 +185,7 @@ impl Default for MemoryStore {
 impl MemoryStoreBacking {
     fn new() -> Self {
         Self {
-            streams: Mutex::new(HashMap::new()),
+            streams: DashMap::new(),
             generator: Mutex::new(Generator::new()),
         }
     }
@@ -203,17 +200,20 @@ impl Default for MemoryStoreBacking {
 impl MemoryStore {
     /// Returns all distinct aggregate IDs in the store.
     pub fn enumerate_aggregates(&self) -> Vec<AggregateId> {
-        let streams = self.backing.streams.lock().expect("streams mutex poisoned");
-        streams.keys().cloned().collect()
+        self.backing
+            .streams
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 
     /// Returns all distinct aggregate IDs of a given type.
     pub fn enumerate_aggregates_by_type(&self, aggregate_type: &AggregateType) -> Vec<AggregateId> {
-        let streams = self.backing.streams.lock().expect("streams mutex poisoned");
-        streams
-            .keys()
-            .filter(|id| *id.aggregate_type() == *aggregate_type)
-            .cloned()
+        self.backing
+            .streams
+            .iter()
+            .filter(|entry| *entry.key().aggregate_type() == *aggregate_type)
+            .map(|entry| entry.key().clone())
             .collect()
     }
 }

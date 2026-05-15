@@ -23,7 +23,7 @@ struct FatProfileUpdate {
 }
 
 fn make_fat(blob_size: usize, seq: u64) -> FatProfileUpdate {
-    let blob: String = std::iter::repeat('x').take(blob_size).collect();
+    let blob: String = std::iter::repeat_n('x', blob_size).collect();
     FatProfileUpdate {
         user_id: format!("user-{seq:08}"),
         event_seq: seq,
