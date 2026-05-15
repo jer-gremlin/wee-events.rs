@@ -242,9 +242,40 @@ pub enum AggregateIdParseError {
     EmptyKey,
 }
 
-newtype_id! {
-    /// The type of aggregate (e.g., "campaign", "character"). Kebab-case by convention.
-    pub struct AggregateType;
+/// The type of aggregate (e.g., "campaign", "character"). Kebab-case by convention.
+///
+/// Arc<str>-backed: clones are refcount bumps. `AggregateId::clone()` is on
+/// the publish/load hot path; this avoids an alloc per clone.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct AggregateType(Arc<str>);
+
+impl AggregateType {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(Arc::from(s.into()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AggregateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<String> for AggregateType {
+    fn from(s: String) -> Self {
+        Self(Arc::from(s))
+    }
+}
+
+impl From<&str> for AggregateType {
+    fn from(s: &str) -> Self {
+        Self(Arc::from(s))
+    }
 }
 
 newtype_id! {
