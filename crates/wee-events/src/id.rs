@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -77,20 +78,26 @@ newtype_id! {
 /// order events were appended. Zero revision (`"00000000000000000000000000"`)
 /// means "no events yet."
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct Revision(String);
+#[serde(transparent)]
+pub struct Revision(Arc<str>);
+
+fn zero_revision_arc() -> Arc<str> {
+    static ZERO: OnceLock<Arc<str>> = OnceLock::new();
+    ZERO.get_or_init(|| Arc::from(ZERO_REVISION)).clone()
+}
 
 impl Revision {
     pub fn new(s: impl Into<String>) -> Self {
-        Self(s.into())
+        Self(Arc::from(s.into()))
     }
 
     /// The zero revision — represents "no events yet."
     pub fn zero() -> Self {
-        Self(ZERO_REVISION.to_string())
+        Self(zero_revision_arc())
     }
 
     pub fn is_zero(&self) -> bool {
-        self.0 == ZERO_REVISION
+        &*self.0 == ZERO_REVISION
     }
 
     pub fn as_str(&self) -> &str {
@@ -112,13 +119,13 @@ impl fmt::Display for Revision {
 
 impl From<String> for Revision {
     fn from(s: String) -> Self {
-        Self(s)
+        Self(Arc::from(s))
     }
 }
 
 impl From<&str> for Revision {
     fn from(s: &str) -> Self {
-        Self(s.to_string())
+        Self(Arc::from(s))
     }
 }
 
@@ -156,7 +163,7 @@ impl From<&str> for Revision {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct AggregateId {
     aggregate_type: AggregateType,
-    aggregate_key: String,
+    aggregate_key: Arc<str>,
 }
 
 impl AggregateId {
@@ -167,7 +174,7 @@ impl AggregateId {
     pub fn new(aggregate_type: impl Into<AggregateType>, aggregate_key: impl Into<String>) -> Self {
         Self {
             aggregate_type: aggregate_type.into(),
-            aggregate_key: aggregate_key.into(),
+            aggregate_key: Arc::from(aggregate_key.into()),
         }
     }
 
@@ -203,7 +210,7 @@ impl FromStr for AggregateId {
 
         Ok(Self {
             aggregate_type: AggregateType::new(agg_type),
-            aggregate_key: agg_key.to_string(),
+            aggregate_key: Arc::from(agg_key),
         })
     }
 }
