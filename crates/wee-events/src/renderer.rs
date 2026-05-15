@@ -180,15 +180,20 @@ impl<S: Default, E> Renderer<S, E> {
 
     /// Folds the aggregate's event stream into projected state.
     ///
+    /// Consumes the aggregate so its `AggregateId` and `Revision` move into
+    /// the resulting `Entity` without cloning. Callers that need the
+    /// aggregate after rendering should clone it first.
+    ///
     /// Unhandled event types fail rendering unless explicitly ignored.
-    pub fn render(&self, aggregate: &Aggregate) -> Result<Entity<S>, RenderError<E>> {
+    pub fn render(&self, aggregate: Aggregate) -> Result<Entity<S>, RenderError<E>> {
         let mut state = S::default();
+        let (id, events, revision) = aggregate.into_parts();
 
-        for event in aggregate.events() {
+        for event in &events {
             if let Some(reducer) = self.reducers.get(&event.event_type) {
                 reducer(&mut state, &event.event_type, &event.data).map_err(|source| {
                     RenderError::ApplyFailed {
-                        context: Box::new(RenderEventContext::new(aggregate, event.as_ref())),
+                        context: Box::new(RenderEventContext::new(&id, event.as_ref())),
                         source,
                     }
                 })?;
@@ -204,7 +209,7 @@ impl<S: Default, E> Renderer<S, E> {
             {
                 reducer(&mut state, &event.event_type, &event.data).map_err(|source| {
                     RenderError::ApplyFailed {
-                        context: Box::new(RenderEventContext::new(aggregate, event.as_ref())),
+                        context: Box::new(RenderEventContext::new(&id, event.as_ref())),
                         source,
                     }
                 })?;
@@ -218,22 +223,22 @@ impl<S: Default, E> Renderer<S, E> {
                 continue;
             }
             return Err(RenderError::UnhandledEventType {
-                context: Box::new(RenderEventContext::new(aggregate, event.as_ref())),
+                context: Box::new(RenderEventContext::new(&id, event.as_ref())),
             });
         }
 
         Ok(Entity {
-            aggregate_id: aggregate.id.clone(),
-            revision: aggregate.revision().clone(),
+            aggregate_id: id,
+            revision,
             state,
         })
     }
 }
 
 impl RenderEventContext {
-    fn new(aggregate: &Aggregate, event: &RecordedEvent) -> Self {
+    fn new(aggregate_id: &AggregateId, event: &RecordedEvent) -> Self {
         Self {
-            aggregate_id: aggregate.id.clone(),
+            aggregate_id: aggregate_id.clone(),
             event_id: event.event_id.clone(),
             event_type: event.event_type.clone(),
             revision: event.revision.clone(),

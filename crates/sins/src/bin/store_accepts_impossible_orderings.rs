@@ -86,7 +86,7 @@ async fn main() {
         .with(EventType::new("door:opened"), on_opened)
         .with(EventType::new("door:locked"), on_locked);
     let agg = store.load(&id).await.unwrap();
-    let result = renderer.render(&agg);
+    let result = renderer.render(agg);
 
     /*
     SUGGESTIION:
