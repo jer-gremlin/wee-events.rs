@@ -139,7 +139,7 @@ async fn load_entity(
 ) -> Result<Entity<CounterState>, MemoryStoreError> {
     let aggregate = store.load(id).await?;
     renderer
-        .render(&aggregate)
+        .render(aggregate)
         .map_err(wee_events::RenderError::into_store_error)
 }
 
