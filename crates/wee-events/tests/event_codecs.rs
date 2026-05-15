@@ -115,7 +115,7 @@ fn renderer_can_decode_events_from_event_data_encoding() {
     let renderer = Renderer::new().with("counter:incremented", reduce);
 
     let entity = renderer
-        .render(&aggregate)
+        .render(aggregate)
         .expect("renderer should decode by encoding");
 
     assert_eq!(entity.state.amount, 21);
@@ -139,7 +139,7 @@ fn renderer_errors_on_unhandled_event_type() {
     let renderer = Renderer::<State>::new();
 
     let error = renderer
-        .render(&aggregate)
+        .render(aggregate)
         .expect_err("unhandled event types should fail entity rendering");
 
     assert!(matches!(
@@ -166,7 +166,7 @@ fn renderer_can_explicitly_ignore_globbed_event_types() {
     let renderer = Renderer::<State>::new().ignore(EventPattern::glob("counter:legacy-*").unwrap());
 
     renderer
-        .render(&aggregate)
+        .render(aggregate)
         .expect("explicitly ignored event types should not fail");
 }
 
@@ -199,7 +199,7 @@ fn renderer_can_reduce_globbed_event_types() {
     let renderer = Renderer::new().with(EventPattern::glob("counter:legacy-*").unwrap(), reduce);
 
     let entity = renderer
-        .render(&aggregate)
+        .render(aggregate)
         .expect("globbed event types should be reducible");
 
     assert_eq!(entity.state.count, 1);
