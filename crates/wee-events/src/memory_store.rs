@@ -248,12 +248,8 @@ impl EventStore for MemoryStore {
     }
 }
 
-static JSON_ENCODER: crate::JsonEncoder = crate::JsonEncoder;
-
 impl crate::EncodesEvents for MemoryStore {
-    type Encoder = crate::JsonEncoder;
-
-    fn event_encoder(&self) -> &Self::Encoder {
-        &JSON_ENCODER
+    fn encoding(&self) -> crate::Encoding {
+        crate::Encoding::Json
     }
 }

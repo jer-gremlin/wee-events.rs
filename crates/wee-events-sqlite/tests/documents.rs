@@ -78,7 +78,6 @@ impl SharedStores {
         let event_store = SqliteEventStore::builder()
             .local(&event_db_path)
             .strategy(GlobalStrategy)
-            .writer(wee_events::JsonEncoder)
             .open()
             .await
             .unwrap();
@@ -320,7 +319,6 @@ async fn event_store_open_only_creates_event_schema() {
     let _store = SqliteEventStore::builder()
         .local(&db_path)
         .strategy(GlobalStrategy)
-        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
@@ -377,7 +375,6 @@ where
     let store = SqliteEventStore::builder()
         .local(S::local_store_path(&temp_dir))
         .strategy(strategy)
-        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();
@@ -410,7 +407,6 @@ where
     let store = SqliteEventStore::builder()
         .local(S::local_store_path(&temp_dir))
         .strategy(strategy)
-        .writer(wee_events::JsonEncoder)
         .open()
         .await
         .unwrap();

@@ -370,7 +370,7 @@ async fn publisher_uses_store_event_encoder() {
 
     assert_eq!(
         changes.events[0].data.encoding,
-        <wee_events::JsonEncoder as wee_events::EventEncoder>::ENCODING
+        wee_events::encoding::json::ENCODING
     );
 }
 

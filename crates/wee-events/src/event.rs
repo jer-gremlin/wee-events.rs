@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-use crate::codec::{EventDecoder, EventEncoder};
+use crate::codec::Encoding;
 use crate::id::{AggregateId, CorrelationId, EventId, EventType, Revision};
 
 /// Encoding-tagged payload. The store treats this as opaque bytes with an
@@ -62,7 +62,7 @@ impl EventData {
 
     /// Creates an `EventData` from a JSON-serializable value.
     pub fn json<T: Serialize>(value: &T) -> Result<Self, crate::EncodeError> {
-        crate::JsonEncoder.serialize(value)
+        Encoding::Json.encode(value)
     }
 
     /// Creates an `EventData` from raw bytes with a given encoding.
@@ -95,18 +95,16 @@ impl EventData {
                 actual: self.encoding.to_string(),
             });
         }
-        crate::JsonDecoder
-            .deserialize(self)
-            .map_err(|err| match err {
-                crate::DecodeError::EncodingMismatch { expected, actual } => {
-                    DeserializeJsonError::EncodingMismatch { expected, actual }
-                }
-                crate::DecodeError::Json(e) => DeserializeJsonError::Decode(e),
-                other => DeserializeJsonError::Decode(serde_json::Error::io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    other,
-                ))),
-            })
+        Encoding::Json.decode(self).map_err(|err| match err {
+            crate::DecodeError::EncodingMismatch { expected, actual } => {
+                DeserializeJsonError::EncodingMismatch { expected, actual }
+            }
+            crate::DecodeError::Json(e) => DeserializeJsonError::Decode(e),
+            other => DeserializeJsonError::Decode(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                other,
+            ))),
+        })
     }
 }
 
