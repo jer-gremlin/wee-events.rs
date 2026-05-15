@@ -22,9 +22,15 @@ mod test_suite;
 
 pub use aggregate::Aggregate;
 pub use codec::{
-    CborDecoder, CborEncoder, CodecError, DecodeError, DecoderList, EncodeError, EncodesEvents,
-    EventDecoder, EventDecoders, EventEncoder, JsonDecoder, JsonEncoder,
+    CodecError, DecodeError, EncodeError, EncodesEvents, Encoding, EventDecoder, EventEncoder,
 };
+pub mod encoding {
+    //! Per-encoding modules. Each exposes `Encoder`, `Decoder`, and an
+    //! `ENCODING` string constant. CBOR is feature-gated.
+    #[cfg(feature = "cbor")]
+    pub use crate::codec::cbor;
+    pub use crate::codec::json;
+}
 pub use command::Command;
 pub use create::{
     InProcessServiceDefinition, ServiceCreateBuilder, ServiceCreateEnvBuilder,
@@ -77,6 +83,6 @@ pub fn to_raw_event<E: DomainEvent + serde::Serialize>(
 ) -> std::result::Result<RawEvent, EncodeError> {
     Ok(RawEvent {
         event_type: event.event_type(),
-        data: JsonEncoder.serialize(event)?,
+        data: Encoding::Json.encode(event)?,
     })
 }

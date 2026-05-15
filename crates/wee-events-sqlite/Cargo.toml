@@ -15,6 +15,7 @@ bench = false
 
 [features]
 turso = ["dep:reqwest"]
+cbor = ["wee-events/cbor"]
 
 [dependencies]
 wee-events = { path = "../wee-events" }

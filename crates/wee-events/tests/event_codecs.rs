@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 use wee_events::{
-    Aggregate, AggregateId, CborDecoder, CborEncoder, DecodeError, EventData, EventDecoder,
-    EventDecoders, EventEncoder, EventId, EventMetadata, EventPattern, EventType, JsonDecoder,
-    JsonEncoder, RecordedEvent, RenderError, Renderer, Revision,
+    Aggregate, AggregateId, DecodeError, Encoding, EventData, EventDecoder, EventEncoder, EventId,
+    EventMetadata, EventPattern, EventType, RecordedEvent, RenderError, Renderer, Revision,
+    encoding::json,
 };
+
+#[cfg(feature = "cbor")]
+use wee_events::encoding::cbor;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Payload {
@@ -12,55 +15,56 @@ struct Payload {
 
 #[test]
 fn json_encoder_and_decoder_round_trip_event_data() {
-    let data = JsonEncoder
+    let data = json::Encoder
         .serialize(&Payload { amount: 7 })
         .expect("json encode should succeed");
 
-    assert_eq!(data.encoding, EventData::JSON_ENCODING);
+    assert_eq!(data.encoding, json::ENCODING);
 
-    let decoded: Payload = JsonDecoder
+    let decoded: Payload = json::Decoder
         .deserialize(&data)
         .expect("json decode should succeed");
     assert_eq!(decoded, Payload { amount: 7 });
 }
 
+#[cfg(feature = "cbor")]
 #[test]
 fn cbor_encoder_and_decoder_round_trip_event_data() {
-    let data = CborEncoder
+    let data = cbor::Encoder
         .serialize(&Payload { amount: 9 })
         .expect("cbor encode should succeed");
 
-    assert_eq!(data.encoding, CborEncoder::ENCODING);
-    assert_ne!(data.encoding, EventData::JSON_ENCODING);
+    assert_eq!(data.encoding, cbor::ENCODING);
+    assert_ne!(data.encoding, json::ENCODING);
 
-    let decoded: Payload = CborDecoder
+    let decoded: Payload = cbor::Decoder
         .deserialize(&data)
         .expect("cbor decode should succeed");
     assert_eq!(decoded, Payload { amount: 9 });
 }
 
+#[cfg(feature = "cbor")]
 #[test]
-fn decoder_set_selects_decoder_by_event_data_encoding() {
-    let decoders = EventDecoders::new().with(JsonDecoder).with(CborDecoder);
-    let data = CborEncoder
+fn encoding_dispatch_selects_decoder_by_event_data_encoding() {
+    let data = cbor::Encoder
         .serialize(&Payload { amount: 11 })
         .expect("cbor encode should succeed");
 
-    let decoded: Payload = decoders
-        .deserialize(&data)
-        .expect("decoder set should find cbor decoder");
+    let encoding = Encoding::from_encoding_str(&data.encoding)
+        .expect("encoding string should resolve to a supported variant");
+    let decoded: Payload = encoding
+        .decode(&data)
+        .expect("dispatch should find cbor decoder");
 
     assert_eq!(decoded, Payload { amount: 11 });
 }
 
 #[test]
-fn decoder_set_reports_unknown_encoding() {
-    let decoders = EventDecoders::new().with(JsonDecoder);
+fn encoding_dispatch_reports_unknown_encoding() {
     let data = EventData::raw("application/x-custom", vec![1, 2, 3]);
 
-    let error = decoders
-        .deserialize::<Payload>(&data)
-        .expect_err("unknown encoding should fail");
+    let error =
+        Encoding::from_encoding_str(&data.encoding).expect_err("unknown encoding should fail");
 
     assert!(matches!(
         error,
@@ -76,6 +80,7 @@ fn event_data_json_helpers_preserve_existing_behavior() {
     assert_eq!(decoded, Payload { amount: 13 });
 }
 
+#[cfg(feature = "cbor")]
 #[test]
 fn renderer_can_decode_events_from_event_data_encoding() {
     #[derive(Default)]
@@ -88,13 +93,13 @@ fn renderer_can_decode_events_from_event_data_encoding() {
         _event_type: &EventType,
         data: &EventData,
     ) -> Result<(), DecodeError> {
-        let decoders = EventDecoders::new().with(JsonDecoder).with(CborDecoder);
-        let payload: Payload = decoders.deserialize(data)?;
+        let encoding = Encoding::from_encoding_str(&data.encoding)?;
+        let payload: Payload = encoding.decode(data)?;
         state.amount += payload.amount;
         Ok(())
     }
 
-    let data = CborEncoder
+    let data = cbor::Encoder
         .serialize(&Payload { amount: 21 })
         .expect("cbor encode should succeed");
     let aggregate = Aggregate::from_events(
