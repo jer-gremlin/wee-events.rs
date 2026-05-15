@@ -77,6 +77,12 @@ impl Aggregate {
         self.events
     }
 
+    /// Consumes the aggregate, returning `(id, events, revision)`. The
+    /// renderer uses this to move identifiers into `Entity` without cloning.
+    pub fn into_parts(self) -> (AggregateId, Vec<Arc<RecordedEvent>>, Revision) {
+        (self.id, self.events, self.revision)
+    }
+
     /// Returns true if this aggregate has no recorded events.
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()

@@ -38,7 +38,7 @@ fn main() {
         vec![rec(DoorEvent::OPENED, 1), rec(DoorEvent::LOCKED, 2)],
     );
 
-    let result = r.render(&agg);
+    let result = r.render(agg);
     assert!(
         result.is_ok(),
         "Renderer compiled despite missing variant coverage; runtime: {result:?}",
