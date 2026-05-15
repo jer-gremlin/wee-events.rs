@@ -37,3 +37,7 @@ trybuild = "1"
 [[bench]]
 name = "memory_store"
 harness = false
+
+[[bench]]
+name = "fat_payload"
+harness = false
