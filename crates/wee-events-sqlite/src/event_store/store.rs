@@ -36,6 +36,11 @@ const BASE_RETRY_DELAY_MS: u64 = 2;
 const MAX_RETRY_DELAY_MS: u64 = 64;
 const LAZY_CREATE_PARTITION_READY_ATTEMPTS: usize = 30;
 const LAZY_CREATE_PARTITION_READY_DELAY_MS: u64 = 1_000;
+const MAX_BUSY_RETRIES: usize = 8;
+const BUSY_BASE_DELAY_MS: u64 = 5;
+const BUSY_MAX_DELAY_MS: u64 = 250;
+const SQLITE_BUSY: i32 = 5;
+const SQLITE_LOCKED: i32 = 6;
 
 /// SQLite-compatible event store backed by libSQL.
 ///
@@ -184,7 +189,8 @@ where
         partition: &S::Partition,
     ) -> Result<SharedConnection, Error> {
         self.remember_partition(partition).await;
-        if let Some(conn) = self.connections.lock().await.get(partition).cloned() {
+        let mut connections = self.connections.lock().await;
+        if let Some(conn) = connections.get(partition).cloned() {
             return Ok(conn);
         }
 
@@ -194,12 +200,8 @@ where
             .prepare_connection_for_partition(partition, &conn)
             .await?;
         let new_conn = Arc::new(AsyncMutex::new(conn));
-
-        let mut connections = self.connections.lock().await;
-        Ok(connections
-            .entry(partition.clone())
-            .or_insert_with(|| Arc::clone(&new_conn))
-            .clone())
+        connections.insert(partition.clone(), Arc::clone(&new_conn));
+        Ok(new_conn)
     }
 
     async fn open_partition_if_exists(
@@ -207,7 +209,8 @@ where
         partition: &S::Partition,
     ) -> Result<Option<SharedConnection>, Error> {
         self.remember_partition(partition).await;
-        if let Some(conn) = self.connections.lock().await.get(partition).cloned() {
+        let mut connections = self.connections.lock().await;
+        if let Some(conn) = connections.get(partition).cloned() {
             return Ok(Some(conn));
         }
 
@@ -224,13 +227,8 @@ where
             .prepare_connection_for_partition(partition, &conn)
             .await?;
         let new_conn = Arc::new(AsyncMutex::new(conn));
-        let mut connections = self.connections.lock().await;
-        Ok(Some(
-            connections
-                .entry(partition.clone())
-                .or_insert_with(|| Arc::clone(&new_conn))
-                .clone(),
-        ))
+        connections.insert(partition.clone(), Arc::clone(&new_conn));
+        Ok(Some(new_conn))
     }
 
     async fn remember_partition(&self, partition: &S::Partition) {
@@ -381,7 +379,7 @@ where
         row.get(0).map_err(Into::into)
     }
 
-    async fn publish_with_connection(
+    async fn publish_with_connection( //TODO: should probably consume, why do you still need some thing after publishing it?
         &self,
         conn: &Connection,
         aggregate_id: &AggregateId,
@@ -402,10 +400,21 @@ where
 
         let mut last_conflict = None;
         for attempt in 0..max_attempts {
-            match self
+            let mut publish_result = self
                 .try_publish_once(conn, aggregate_id, &options, &events)
-                .await
-            {
+                .await;
+            for busy_attempt in 0..MAX_BUSY_RETRIES {
+                match &publish_result {
+                    Err(PublishAttemptError::Store(error)) if is_sqlite_busy(error) => {
+                        sleep(busy_retry_delay(busy_attempt)).await;
+                        publish_result = self
+                            .try_publish_once(conn, aggregate_id, &options, &events)
+                            .await;
+                    }
+                    _ => break,
+                }
+            }
+            match publish_result {
                 Ok(changeset) => return Ok(changeset),
                 Err(PublishAttemptError::Conflict(conflict)) if can_auto_retry => {
                     last_conflict = Some(RetryDiagnostics {
@@ -582,6 +591,29 @@ fn retry_delay(attempt: usize) -> Duration {
 
 fn lazy_create_partition_ready_delay() -> Duration {
     Duration::from_millis(LAZY_CREATE_PARTITION_READY_DELAY_MS)
+}
+
+fn busy_retry_delay(attempt: usize) -> Duration {
+    let exponent = attempt.min(6) as u32;
+    let backoff_ms = (BUSY_BASE_DELAY_MS << exponent).min(BUSY_MAX_DELAY_MS);
+    let jitter_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as u64
+        % (backoff_ms + 1);
+    Duration::from_millis(backoff_ms + jitter_ms)
+}
+
+fn is_sqlite_busy(error: &Error) -> bool {
+    match error {
+        Error::Libsql(libsql::Error::SqliteFailure(code, _)) => {
+            *code == SQLITE_BUSY || *code == SQLITE_LOCKED
+        }
+        Error::Libsql(libsql::Error::RemoteSqliteFailure(_, code, _)) => {
+            *code == SQLITE_BUSY || *code == SQLITE_LOCKED
+        }
+        _ => false,
+    }
 }
 
 fn is_lazy_create_partition_not_ready(error: &Error) -> bool {

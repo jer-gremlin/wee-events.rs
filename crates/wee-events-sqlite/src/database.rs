@@ -26,6 +26,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_events_aggregate
     ON events (aggregate_type, aggregate_key, revision);
 ";
 
+//FIXME: hard-commit to json here...
 const DOCUMENTS_DDL: &str = "
 CREATE TABLE IF NOT EXISTS documents (
     collection  TEXT NOT NULL,
@@ -118,7 +119,7 @@ async fn prepare_local_connection(conn: &Connection) -> Result<(), Error> {
         }
     }
 
-    conn.busy_timeout(Duration::from_millis(5000))?;
+    conn.busy_timeout(Duration::from_millis(30_000))?; //TODO: const
     conn.execute_batch("PRAGMA foreign_keys=ON;").await?;
     Ok(())
 }
