@@ -379,7 +379,8 @@ where
         row.get(0).map_err(Into::into)
     }
 
-    async fn publish_with_connection( //TODO: should probably consume, why do you still need some thing after publishing it?
+    async fn publish_with_connection(
+        //TODO: should probably consume, why do you still need some thing after publishing it?
         &self,
         conn: &Connection,
         aggregate_id: &AggregateId,
@@ -579,11 +580,7 @@ fn retry_delay(attempt: usize) -> Duration {
     let jitter_ms = if backoff_ms == 0 {
         0
     } else {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos() as u64
-            % (backoff_ms + 1)
+        next_jitter() % (backoff_ms + 1)
     };
 
     Duration::from_millis(backoff_ms + jitter_ms)
@@ -596,12 +593,30 @@ fn lazy_create_partition_ready_delay() -> Duration {
 fn busy_retry_delay(attempt: usize) -> Duration {
     let exponent = attempt.min(6) as u32;
     let backoff_ms = (BUSY_BASE_DELAY_MS << exponent).min(BUSY_MAX_DELAY_MS);
-    let jitter_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as u64
-        % (backoff_ms + 1);
+    let jitter_ms = next_jitter() % (backoff_ms + 1);
     Duration::from_millis(backoff_ms + jitter_ms)
+}
+
+/// Lock-free xorshift64* PRNG for retry jitter. Seeded from the system clock
+/// on first call. Relaxed ordering — occasional double-step under racy callers
+/// is fine; we only need decorrelated short delays.
+fn next_jitter() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static STATE: AtomicU64 = AtomicU64::new(0);
+    let mut x = STATE.load(Ordering::Relaxed);
+    if x == 0 {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64
+            | 1;
+        x = seed;
+    }
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    STATE.store(x, Ordering::Relaxed);
+    x.wrapping_mul(0x2545F4914F6CDD1D)
 }
 
 fn is_sqlite_busy(error: &Error) -> bool {
@@ -616,16 +631,33 @@ fn is_sqlite_busy(error: &Error) -> bool {
     }
 }
 
+/// Detects the lazy-create "namespace doesn't exist yet" condition for sqld /
+/// Turso remote backends. The underlying libsql error doesn't carry a
+/// structured code for this case — it bubbles up as a 404 inside one of the
+/// remote-transport variants. We narrow to those variants so unrelated local
+/// failures can't accidentally match, then string-test the inner message.
 fn is_lazy_create_partition_not_ready(error: &Error) -> bool {
-    match error {
-        Error::Libsql(error) => is_lazy_create_partition_not_ready_message(&error.to_string()),
-        _ => false,
-    }
+    let Error::Libsql(libsql_error) = error else {
+        return false;
+    };
+    let message = match libsql_error {
+        libsql::Error::Hrana(e) => e.to_string(),
+        libsql::Error::WriteDelegation(e) => e.to_string(),
+        libsql::Error::ConnectionFailed(s) => s.clone(),
+        _ => return false,
+    };
+    is_lazy_create_partition_not_ready_message(&message)
 }
 
 fn is_lazy_create_partition_not_ready_message(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
-    message.contains("namespace") && message.contains("doesn't exist")
+    if !message.contains("namespace") {
+        return false;
+    }
+    message.contains("doesn't exist")
+        || message.contains("does not exist")
+        || message.contains("not found")
+        || message.contains("404")
 }
 
 fn possible_clock_skew_ms(attempted: &Revision, actual: &Revision) -> Option<u64> {
@@ -1026,8 +1058,8 @@ async fn execute_publish_statement(
     let correlation = row.metadata.correlation_id.as_ref().map(|id| id.as_str());
 
     match (row.index, &row.options.expected_revision) {
-        (0, Some(expected)) if expected.is_zero() => {
-            tx.execute(
+        (0, Some(expected)) if expected.is_zero() => tx
+            .execute(
                 SQL_INITIAL,
                 libsql::params![
                     row.event_id.as_str(),
@@ -1042,10 +1074,9 @@ async fn execute_publish_statement(
                 ],
             )
             .await
-            .map_err(Into::into)
-        }
-        (0, Some(expected)) => {
-            tx.execute(
+            .map_err(Into::into),
+        (0, Some(expected)) => tx
+            .execute(
                 SQL_EXACT,
                 libsql::params![
                     row.event_id.as_str(),
@@ -1061,10 +1092,9 @@ async fn execute_publish_statement(
                 ],
             )
             .await
-            .map_err(Into::into)
-        }
-        _ => {
-            tx.execute(
+            .map_err(Into::into),
+        _ => tx
+            .execute(
                 SQL_ADVANCE,
                 libsql::params![
                     row.event_id.as_str(),
@@ -1079,8 +1109,7 @@ async fn execute_publish_statement(
                 ],
             )
             .await
-            .map_err(Into::into)
-        }
+            .map_err(Into::into),
     }
 }
 

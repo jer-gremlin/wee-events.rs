@@ -178,6 +178,7 @@ impl<S: Default, E> Renderer<S, E> {
         }
     }
 
+    //TODO: work out a way to make this work with some kinda call to Fold<T> .i.e .fold(||{}) so it's more rusty..
     /// Folds the aggregate's event stream into projected state.
     ///
     /// Consumes the aggregate so its `AggregateId` and `Revision` move into
@@ -247,6 +248,8 @@ impl RenderEventContext {
     }
 }
 
+//FIXME: hand rolled `str::starts_with`, just use that -- you'll struggle
+// to beat the std lib.
 fn glob_matches(pattern: &str, text: &str) -> bool {
     let pattern = pattern.as_bytes();
     let text = text.as_bytes();
