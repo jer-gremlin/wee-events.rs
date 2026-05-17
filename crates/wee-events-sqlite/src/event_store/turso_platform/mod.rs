@@ -745,7 +745,9 @@ mod tests {
 
     #[test]
     fn from_env_returns_error_on_missing_var() {
-        std::env::remove_var("TURSO_ORG");
+        // SAFETY: Rust 2024 marks env mutation unsafe due to multi-thread
+        // hazards. Test process is single-threaded here.
+        unsafe { std::env::remove_var("TURSO_ORG") };
         let result = TursoPlatformConfig::from_env();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("TURSO_ORG"));

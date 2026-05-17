@@ -75,16 +75,17 @@ impl MemoryStore {
     fn mint_event_ids(&self, count: usize) -> Result<Vec<(EventId, Revision)>, MemoryStoreError> {
         let mut generator = self.backing.generator.lock();
         let mut out = Vec::with_capacity(count);
+        let mut buf = [0u8; ulid::ULID_LEN];
         for _ in 0..count {
             let event_id = generator
                 .generate()
-                .map_err(|e| MemoryStoreError::Ulid(Box::new(e)))?
-                .to_string();
+                .map_err(|e| MemoryStoreError::Ulid(Box::new(e)))?;
             let revision = generator
                 .generate()
-                .map_err(|e| MemoryStoreError::Ulid(Box::new(e)))?
-                .to_string();
-            out.push((EventId::new(event_id), Revision::new(revision)));
+                .map_err(|e| MemoryStoreError::Ulid(Box::new(e)))?;
+            let event_id = EventId::from(&*event_id.array_to_str(&mut buf));
+            let revision = Revision::from(&*revision.array_to_str(&mut buf));
+            out.push((event_id, revision));
         }
         Ok(out)
     }

@@ -936,29 +936,39 @@ where
     }
 }
 
-/// Shared INSERT prefix for all publish variants. The WHERE clause varies
-/// by concurrency mode; only the suffix changes.
-const INSERT_PREFIX: &str =
-    "INSERT INTO events (event_id, aggregate_type, aggregate_key, event_type, revision,
-                         causation_id, correlation_id, encoding, data)
-     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9";
+/// Initial-publish INSERT: aggregate must have no prior events.
+const SQL_INITIAL: &str = "\
+    INSERT INTO events (event_id, aggregate_type, aggregate_key, event_type, revision,
+                        causation_id, correlation_id, encoding, data)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+    WHERE NOT EXISTS (
+        SELECT 1 FROM events
+        WHERE aggregate_type = ?2 AND aggregate_key = ?3
+    )";
 
-/// WHERE clause for the common case: new revision must exceed current max.
-const ADVANCE_WHERE: &str = " WHERE ?5 > COALESCE(
-         (SELECT MAX(revision) FROM events
-          WHERE aggregate_type = ?2 AND aggregate_key = ?3),
-         '00000000000000000000000000'
-     )";
+/// Exact-revision INSERT: monotonic advance + caller-supplied prior revision must match current max.
+const SQL_EXACT: &str = "\
+    INSERT INTO events (event_id, aggregate_type, aggregate_key, event_type, revision,
+                        causation_id, correlation_id, encoding, data)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+    WHERE ?5 > COALESCE(
+        (SELECT MAX(revision) FROM events
+         WHERE aggregate_type = ?2 AND aggregate_key = ?3),
+        '00000000000000000000000000'
+    )
+    AND (SELECT MAX(revision) FROM events
+         WHERE aggregate_type = ?2 AND aggregate_key = ?3) = ?10";
 
-/// WHERE clause for initial publish: aggregate must have no events.
-const INITIAL_WHERE: &str = " WHERE NOT EXISTS (
-         SELECT 1 FROM events
-         WHERE aggregate_type = ?2 AND aggregate_key = ?3
-     )";
-
-/// Extra AND clause for exact revision match (appended after ADVANCE_WHERE).
-const EXACT_SUFFIX: &str = " AND (SELECT MAX(revision) FROM events
-          WHERE aggregate_type = ?2 AND aggregate_key = ?3) = ?10";
+/// Advance INSERT: monotonic advance only, no exact-prior check.
+const SQL_ADVANCE: &str = "\
+    INSERT INTO events (event_id, aggregate_type, aggregate_key, event_type, revision,
+                        causation_id, correlation_id, encoding, data)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+    WHERE ?5 > COALESCE(
+        (SELECT MAX(revision) FROM events
+         WHERE aggregate_type = ?2 AND aggregate_key = ?3),
+        '00000000000000000000000000'
+    )";
 
 struct PublishRow<'a> {
     index: usize,
@@ -985,9 +995,8 @@ async fn execute_publish_statement(
 
     match (row.index, &row.options.expected_revision) {
         (0, Some(expected)) if expected.is_zero() => {
-            let sql = format!("{INSERT_PREFIX}{INITIAL_WHERE}");
             tx.execute(
-                &sql,
+                SQL_INITIAL,
                 libsql::params![
                     row.event_id.as_str(),
                     row.aggregate_id.aggregate_type().as_str(),
@@ -1004,9 +1013,8 @@ async fn execute_publish_statement(
             .map_err(Into::into)
         }
         (0, Some(expected)) => {
-            let sql = format!("{INSERT_PREFIX}{ADVANCE_WHERE}{EXACT_SUFFIX}");
             tx.execute(
-                &sql,
+                SQL_EXACT,
                 libsql::params![
                     row.event_id.as_str(),
                     row.aggregate_id.aggregate_type().as_str(),
@@ -1024,9 +1032,8 @@ async fn execute_publish_statement(
             .map_err(Into::into)
         }
         _ => {
-            let sql = format!("{INSERT_PREFIX}{ADVANCE_WHERE}");
             tx.execute(
-                &sql,
+                SQL_ADVANCE,
                 libsql::params![
                     row.event_id.as_str(),
                     row.aggregate_id.aggregate_type().as_str(),

@@ -109,7 +109,7 @@ pub(crate) async fn open_document_store_in_memory_connection() -> Result<Connect
 
 async fn prepare_local_connection(conn: &Connection) -> Result<(), Error> {
     let journal_mode = query_required_string(conn, "PRAGMA journal_mode").await?;
-    if journal_mode != "memory" {
+    if journal_mode != "memory" && journal_mode != "wal" {
         let confirmed = query_required_string(conn, "PRAGMA journal_mode=WAL").await?;
         if confirmed != "wal" {
             return Err(Error::Configuration(format!(
