@@ -55,6 +55,6 @@ async fn create_still_works_with_renamed_handler() {
         .with_env(())
         .build();
     let id: AggregateId = "counter:c1".parse().unwrap();
-    let entity = service.execute(&id, Bump).await.unwrap();
+    let entity = service.execute(id.clone(), Bump).await.unwrap();
     assert_eq!(entity.state.value, 0);
 }
