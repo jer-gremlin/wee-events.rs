@@ -1,7 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
-use std::marker::PhantomData;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -19,8 +17,7 @@ use wee_events::{
 use crate::{Error, database};
 
 use super::backends::{
-    BackendBinding, InMemoryTargetResolver, LocalPartitionCatalog, NamedTargetCatalog,
-    SingleTargetCatalog,
+    InMemoryTargetResolver, LocalPartitionCatalog, NamedTargetCatalog, SingleTargetCatalog,
 };
 use super::strategies::{
     GlobalStrategy, LocalPartitionStrategy, PartitionNamingStrategy, PartitionRead,
@@ -71,33 +68,80 @@ pub type SingleRemoteStore<S, R> =
 pub type NamedRemoteStore<S, R> = EventStore<S, NamedTargetCatalog<S, R>>;
 pub type RemoteStore<S, C> = EventStore<S, C>;
 
-impl EventStore<GlobalStrategy, LocalPartitionCatalog<GlobalStrategy>> {
-    pub fn builder() -> EventStoreBuilder<MissingBackend, MissingStrategy<()>> {
-        EventStoreBuilder::new()
-    }
-}
-
 impl<S> EventStore<S, LocalPartitionCatalog<S>>
 where
     S: LocalPartitionStrategy,
 {
-    /// Opens a local store with the requested partitioning strategy.
-    ///
-    /// For `GlobalStrategy`, `path` is the database file.
-    /// For sharded strategies, `path` is the root directory.
-    pub async fn open_with_strategy(path: impl AsRef<Path>, strategy: S) -> Result<Self, Error> {
-        let store = EventStore::from_catalog(
-            strategy.clone(),
-            LocalPartitionCatalog::new(path.as_ref().to_path_buf(), strategy)?,
-            Encoding::Json,
-        );
-
-        for partition in store.strategy.bootstrap_partitions() {
-            let _ = store.ensure_partition_open(&partition).await?;
-        }
-
-        Ok(store)
+    /// Opens a file-backed store at `path`. For `GlobalStrategy`, `path` is
+    /// the database file; for sharded strategies, `path` is the root directory.
+    /// Encoding defaults to JSON — call [`with_encoding`](Self::with_encoding)
+    /// to override.
+    pub async fn open_local(path: impl AsRef<Path>, strategy: S) -> Result<Self, Error> {
+        let catalog = LocalPartitionCatalog::new(path.as_ref().to_path_buf(), strategy.clone())?;
+        bootstrap(EventStore::from_catalog(strategy, catalog, Encoding::Json)).await
     }
+}
+
+impl<S> EventStore<S, SingleTargetCatalog<S::Partition, InMemoryTargetResolver>>
+where
+    S: PartitionStrategy + SingleTargetPartitionStrategy,
+{
+    /// Opens an ephemeral in-memory store. Encoding defaults to JSON — call
+    /// [`with_encoding`](Self::with_encoding) to override.
+    pub async fn open_in_memory(strategy: S) -> Result<Self, Error> {
+        let catalog = SingleTargetCatalog::new(InMemoryTargetResolver);
+        bootstrap(EventStore::from_catalog(strategy, catalog, Encoding::Json)).await
+    }
+}
+
+impl<S, R> EventStore<S, SingleTargetCatalog<S::Partition, R>>
+where
+    S: PartitionStrategy + SingleTargetPartitionStrategy,
+    R: SqldDefaultProvisioner,
+{
+    /// Opens a single-target sqld-backed store. Encoding defaults to JSON.
+    pub async fn open_sqld_default(provisioner: R, strategy: S) -> Result<Self, Error> {
+        let catalog = SingleTargetCatalog::new(provisioner);
+        bootstrap(EventStore::from_catalog(strategy, catalog, Encoding::Json)).await
+    }
+}
+
+impl<S, R> EventStore<S, NamedTargetCatalog<S, R>>
+where
+    S: PartitionStrategy + SqldNamespacedPartitionStrategy + PartitionNamingStrategy,
+    R: SqldNamespacedProvisioner,
+{
+    /// Opens a namespaced sqld-backed store. The strategy supplies stable
+    /// partition names; the provisioner maps them to sqld namespaces.
+    /// Encoding defaults to JSON.
+    pub async fn open_sqld_namespaced(provisioner: R, strategy: S) -> Result<Self, Error> {
+        let catalog = NamedTargetCatalog::new(strategy.clone(), provisioner);
+        bootstrap(EventStore::from_catalog(strategy, catalog, Encoding::Json)).await
+    }
+}
+
+impl<S, R> EventStore<S, NamedTargetCatalog<S, R>>
+where
+    S: PartitionStrategy + PartitionNamingStrategy,
+    R: TursoProvisioner,
+{
+    /// Opens a Turso-backed store. Encoding defaults to JSON.
+    pub async fn open_turso(provisioner: R, strategy: S) -> Result<Self, Error> {
+        let catalog = NamedTargetCatalog::new(strategy.clone(), provisioner);
+        bootstrap(EventStore::from_catalog(strategy, catalog, Encoding::Json)).await
+    }
+}
+
+/// Bootstraps partitions for a freshly-built store and returns it.
+async fn bootstrap<S, C>(store: EventStore<S, C>) -> Result<EventStore<S, C>, Error>
+where
+    S: PartitionStrategy,
+    C: PartitionCatalog<S::Partition>,
+{
+    for partition in store.strategy.bootstrap_partitions() {
+        let _ = store.ensure_partition_open(&partition).await?;
+    }
+    Ok(store)
 }
 
 impl<S, C> EventStore<S, C>
@@ -105,6 +149,14 @@ where
     S: PartitionStrategy,
     C: PartitionCatalog<S::Partition>,
 {
+    /// Overrides the on-disk payload encoding. Defaults to [`Encoding::Json`]
+    /// at construction. Safe to call after `open_*` — encoding only affects
+    /// future writes.
+    pub fn with_encoding(mut self, encoding: Encoding) -> Self {
+        self.encoding = encoding;
+        self
+    }
+
     /// Builds a store from a custom partition catalog.
     pub fn from_catalog(strategy: S, catalog: C, encoding: Encoding) -> Self {
         Self {
@@ -653,304 +705,6 @@ fn possible_clock_skew_ms(attempted: &Revision, actual: &Revision) -> Option<u64
         .timestamp_ms()
         .checked_sub(attempted_ulid.timestamp_ms())
         .filter(|delta| *delta > 0)
-}
-
-pub struct MissingBackend;
-pub struct InMemoryBackend;
-pub struct LocalBackend {
-    pub(super) path: PathBuf,
-}
-pub struct SqldDefaultBackend<R> {
-    pub(super) provisioner: R,
-}
-pub struct SqldNamespacedBackend<R> {
-    pub(super) provisioner: R,
-}
-pub struct TursoBackend<R> {
-    pub(super) provisioner: R,
-}
-
-pub struct MissingStrategy<P>(PhantomData<P>);
-pub struct WithStrategy<S>(S);
-
-pub struct EventStoreBuilder<B, T> {
-    backend: B,
-    strategy: T,
-    encoding: Encoding,
-}
-
-impl EventStoreBuilder<MissingBackend, MissingStrategy<()>> {
-    fn new() -> Self {
-        Self {
-            backend: MissingBackend,
-            strategy: MissingStrategy(PhantomData),
-            encoding: Encoding::Json,
-        }
-    }
-}
-
-impl<B, T> EventStoreBuilder<B, T> {
-    /// Sets the on-disk payload encoding. Defaults to [`Encoding::Json`].
-    pub fn encoding(mut self, encoding: Encoding) -> Self {
-        self.encoding = encoding;
-        self
-    }
-}
-
-impl EventStoreBuilder<MissingBackend, MissingStrategy<()>> {
-    pub fn local(
-        self,
-        path: impl AsRef<Path>,
-    ) -> EventStoreBuilder<LocalBackend, MissingStrategy<()>> {
-        EventStoreBuilder {
-            backend: LocalBackend {
-                path: path.as_ref().to_path_buf(),
-            },
-            strategy: self.strategy,
-            encoding: self.encoding,
-        }
-    }
-
-    /// Configures an ephemeral single-database in-memory backend.
-    pub fn in_memory(self) -> EventStoreBuilder<InMemoryBackend, MissingStrategy<()>> {
-        EventStoreBuilder {
-            backend: InMemoryBackend,
-            strategy: self.strategy,
-            encoding: self.encoding,
-        }
-    }
-
-    pub fn sqld_default<R>(
-        self,
-        provisioner: R,
-    ) -> EventStoreBuilder<SqldDefaultBackend<R>, MissingStrategy<()>>
-    where
-        R: SqldDefaultProvisioner,
-    {
-        EventStoreBuilder {
-            backend: SqldDefaultBackend { provisioner },
-            strategy: MissingStrategy(PhantomData),
-            encoding: self.encoding,
-        }
-    }
-
-    /// Configures a namespaced sqld backend.
-    ///
-    /// Strategies used with this backend must provide stable partition names.
-    /// The provisioner is responsible for mapping those names to sqld
-    /// namespaces.
-    pub fn sqld_namespaced<R>(
-        self,
-        provisioner: R,
-    ) -> EventStoreBuilder<SqldNamespacedBackend<R>, MissingStrategy<()>>
-    where
-        R: SqldNamespacedProvisioner,
-    {
-        EventStoreBuilder {
-            backend: SqldNamespacedBackend { provisioner },
-            strategy: MissingStrategy(PhantomData),
-            encoding: self.encoding,
-        }
-    }
-
-    pub fn turso<R>(self, provisioner: R) -> EventStoreBuilder<TursoBackend<R>, MissingStrategy<()>>
-    where
-        R: TursoProvisioner,
-    {
-        EventStoreBuilder {
-            backend: TursoBackend { provisioner },
-            strategy: MissingStrategy(PhantomData),
-            encoding: self.encoding,
-        }
-    }
-
-    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<MissingBackend, WithStrategy<S>>
-    where
-        S: PartitionStrategy,
-    {
-        EventStoreBuilder {
-            backend: self.backend,
-            strategy: WithStrategy(strategy),
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl EventStoreBuilder<LocalBackend, MissingStrategy<()>> {
-    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<LocalBackend, WithStrategy<S>>
-    where
-        S: LocalPartitionStrategy,
-    {
-        EventStoreBuilder {
-            backend: self.backend,
-            strategy: WithStrategy(strategy),
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl EventStoreBuilder<InMemoryBackend, MissingStrategy<()>> {
-    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<InMemoryBackend, WithStrategy<S>>
-    where
-        S: SingleTargetPartitionStrategy,
-    {
-        EventStoreBuilder {
-            backend: self.backend,
-            strategy: WithStrategy(strategy),
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<R> EventStoreBuilder<SqldDefaultBackend<R>, MissingStrategy<()>>
-where
-    R: SqldDefaultProvisioner,
-{
-    pub fn strategy<S>(
-        self,
-        strategy: S,
-    ) -> EventStoreBuilder<SqldDefaultBackend<R>, WithStrategy<S>>
-    where
-        S: SingleTargetPartitionStrategy,
-    {
-        EventStoreBuilder {
-            backend: self.backend,
-            strategy: WithStrategy(strategy),
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<R> EventStoreBuilder<SqldNamespacedBackend<R>, MissingStrategy<()>>
-where
-    R: SqldNamespacedProvisioner,
-{
-    pub fn strategy<S>(
-        self,
-        strategy: S,
-    ) -> EventStoreBuilder<SqldNamespacedBackend<R>, WithStrategy<S>>
-    where
-        S: SqldNamespacedPartitionStrategy + PartitionNamingStrategy,
-    {
-        EventStoreBuilder {
-            backend: self.backend,
-            strategy: WithStrategy(strategy),
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<R> EventStoreBuilder<TursoBackend<R>, MissingStrategy<()>>
-where
-    R: TursoProvisioner,
-{
-    pub fn strategy<S>(self, strategy: S) -> EventStoreBuilder<TursoBackend<R>, WithStrategy<S>>
-    where
-        S: PartitionNamingStrategy,
-    {
-        EventStoreBuilder {
-            backend: self.backend,
-            strategy: WithStrategy(strategy),
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
-where
-    S: SingleTargetPartitionStrategy,
-{
-    pub fn in_memory(self) -> EventStoreBuilder<InMemoryBackend, WithStrategy<S>> {
-        EventStoreBuilder {
-            backend: InMemoryBackend,
-            strategy: self.strategy,
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
-where
-    S: LocalPartitionStrategy,
-{
-    pub fn local(self, path: impl AsRef<Path>) -> EventStoreBuilder<LocalBackend, WithStrategy<S>> {
-        EventStoreBuilder {
-            backend: LocalBackend {
-                path: path.as_ref().to_path_buf(),
-            },
-            strategy: self.strategy,
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
-where
-    S: SingleTargetPartitionStrategy,
-{
-    pub fn sqld_default(
-        self,
-        provisioner: impl SqldDefaultProvisioner,
-    ) -> EventStoreBuilder<SqldDefaultBackend<impl SqldDefaultProvisioner>, WithStrategy<S>> {
-        EventStoreBuilder {
-            backend: SqldDefaultBackend { provisioner },
-            strategy: self.strategy,
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
-where
-    S: PartitionNamingStrategy,
-{
-    pub fn turso(
-        self,
-        provisioner: impl TursoProvisioner,
-    ) -> EventStoreBuilder<TursoBackend<impl TursoProvisioner>, WithStrategy<S>> {
-        EventStoreBuilder {
-            backend: TursoBackend { provisioner },
-            strategy: self.strategy,
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<S> EventStoreBuilder<MissingBackend, WithStrategy<S>>
-where
-    S: SqldNamespacedPartitionStrategy + PartitionNamingStrategy,
-{
-    pub fn sqld_namespaced(
-        self,
-        provisioner: impl SqldNamespacedProvisioner,
-    ) -> EventStoreBuilder<SqldNamespacedBackend<impl SqldNamespacedProvisioner>, WithStrategy<S>>
-    {
-        EventStoreBuilder {
-            backend: SqldNamespacedBackend { provisioner },
-            strategy: self.strategy,
-            encoding: self.encoding,
-        }
-    }
-}
-
-impl<B, S> EventStoreBuilder<B, WithStrategy<S>>
-where
-    S: PartitionStrategy,
-    B: BackendBinding<S>,
-{
-    pub async fn open(self) -> Result<EventStore<S, B::Catalog>, Error> {
-        let store = EventStore::from_catalog(
-            self.strategy.0.clone(),
-            self.backend.into_catalog(&self.strategy.0)?,
-            self.encoding,
-        );
-
-        for partition in store.strategy.bootstrap_partitions() {
-            let _ = store.ensure_partition_open(&partition).await?;
-        }
-
-        Ok(store)
-    }
 }
 
 impl<S, C> wee_events::EncodesEvents for EventStore<S, C>

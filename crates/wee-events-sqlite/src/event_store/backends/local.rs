@@ -6,10 +6,8 @@ use libsql::Connection;
 use crate::{Error, database};
 
 use super::super::partitioning::PartitionCatalog;
-use super::super::store::LocalBackend;
 use super::super::strategies::{LocalPartitionLayout, LocalPartitionStrategy, PartitionName};
 use super::super::types::DatabaseTarget;
-use super::BackendBinding;
 
 #[derive(Debug)]
 pub struct LocalPartitionCatalog<S> {
@@ -107,17 +105,6 @@ where
         }
 
         Ok(())
-    }
-}
-
-impl<S> BackendBinding<S> for LocalBackend
-where
-    S: LocalPartitionStrategy,
-{
-    type Catalog = LocalPartitionCatalog<S>;
-
-    fn into_catalog(self, strategy: &S) -> Result<Self::Catalog, Error> {
-        LocalPartitionCatalog::new(self.path, strategy.clone())
     }
 }
 

@@ -75,10 +75,7 @@ impl SharedStores {
             "wee-events-sqlite-documents-{}.db",
             ulid::Ulid::new()
         ));
-        let event_store = SqliteEventStore::builder()
-            .local(&event_db_path)
-            .strategy(GlobalStrategy)
-            .open()
+        let event_store = SqliteEventStore::open_local(&event_db_path, GlobalStrategy)
             .await
             .unwrap();
         let document_store = DocumentStore::open(&document_db_path).await.unwrap();
@@ -316,10 +313,7 @@ async fn event_store_open_only_creates_event_schema() {
         "wee-events-sqlite-events-only-{}.db",
         ulid::Ulid::new()
     ));
-    let _store = SqliteEventStore::builder()
-        .local(&db_path)
-        .strategy(GlobalStrategy)
-        .open()
+    let _store = SqliteEventStore::open_local(&db_path, GlobalStrategy)
         .await
         .unwrap();
 
@@ -372,10 +366,7 @@ where
     S: LocalPartitionStrategy + LocalStorePath,
 {
     let temp_dir = tempfile::tempdir().unwrap();
-    let store = SqliteEventStore::builder()
-        .local(S::local_store_path(&temp_dir))
-        .strategy(strategy)
-        .open()
+    let store = SqliteEventStore::open_local(S::local_store_path(&temp_dir), strategy)
         .await
         .unwrap();
 
@@ -404,10 +395,7 @@ where
     S: LocalPartitionStrategy + LocalStorePath,
 {
     let temp_dir = tempfile::tempdir().unwrap();
-    let store = SqliteEventStore::builder()
-        .local(S::local_store_path(&temp_dir))
-        .strategy(strategy)
-        .open()
+    let store = SqliteEventStore::open_local(S::local_store_path(&temp_dir), strategy)
         .await
         .unwrap();
 
