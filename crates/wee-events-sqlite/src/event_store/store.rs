@@ -60,7 +60,6 @@ where
     catalog: C,
     encoding: Encoding,
     connections: AsyncMutex<HashMap<S::Partition, SharedConnection>>,
-    known_partitions: AsyncMutex<BTreeSet<S::Partition>>,
     generator: Mutex<Generator>,
 }
 
@@ -113,7 +112,6 @@ where
             catalog,
             encoding,
             connections: AsyncMutex::new(HashMap::new()),
-            known_partitions: AsyncMutex::new(BTreeSet::new()),
             generator: Mutex::new(Generator::new()),
         }
     }
@@ -188,7 +186,6 @@ where
         &self,
         partition: &S::Partition,
     ) -> Result<SharedConnection, Error> {
-        self.remember_partition(partition).await;
         let mut connections = self.connections.lock().await;
         if let Some(conn) = connections.get(partition).cloned() {
             return Ok(conn);
@@ -208,7 +205,6 @@ where
         &self,
         partition: &S::Partition,
     ) -> Result<Option<SharedConnection>, Error> {
-        self.remember_partition(partition).await;
         let mut connections = self.connections.lock().await;
         if let Some(conn) = connections.get(partition).cloned() {
             return Ok(Some(conn));
@@ -231,18 +227,10 @@ where
         Ok(Some(new_conn))
     }
 
-    async fn remember_partition(&self, partition: &S::Partition) {
-        let mut known = self.known_partitions.lock().await;
-        known.insert(partition.clone());
-    }
-
     async fn all_known_partitions(&self) -> Result<Vec<S::Partition>, Error> {
         let mut partitions: BTreeSet<S::Partition> =
             self.catalog.partitions().await?.into_iter().collect();
-        {
-            let known = self.known_partitions.lock().await;
-            partitions.extend(known.iter().cloned());
-        }
+        partitions.extend(self.connections.lock().await.keys().cloned());
         Ok(partitions.into_iter().collect())
     }
 
@@ -349,7 +337,6 @@ where
 
     async fn load_aggregate(&self, id: &AggregateId) -> Result<Aggregate, Error> {
         let partition = self.strategy.partition_for_aggregate(id)?;
-        self.remember_partition(&partition).await;
         let Some(conn) = self.open_partition_if_exists(&partition).await? else {
             return Ok(Aggregate::empty(id.clone()));
         };
@@ -453,7 +440,6 @@ where
         events: Vec<RawEvent>,
     ) -> Result<ChangeSet, Error> {
         let partition = self.strategy.partition_for_aggregate(aggregate_id)?;
-        self.remember_partition(&partition).await;
 
         for attempt in 0..LAZY_CREATE_PARTITION_READY_ATTEMPTS {
             let result = async {
