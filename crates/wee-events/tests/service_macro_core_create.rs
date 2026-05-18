@@ -78,7 +78,10 @@ async fn create_builds_typed_in_process_service_and_reloads_after_void_handler()
         .build();
 
     let id: AggregateId = "counter:c1".parse().unwrap();
-    let entity = service.execute(&id, Increment { amount: 3 }).await.unwrap();
+    let entity = service
+        .execute(id.clone(), Increment { amount: 3 })
+        .await
+        .unwrap();
 
     assert_eq!(entity.aggregate_id, id);
     assert_ne!(entity.revision, Revision::zero());

@@ -302,11 +302,7 @@ where
     for<'a> &'a F: FactoryBridge<'a, Ctx>,
 {
     /// Load the current entity state. Calls the factory then the loader.
-    pub fn load(
-        &self,
-        id: &AggregateId,
-    ) -> impl Future<Output = Result<Entity<S>, EL>> + Send + '_ {
-        let id = id.clone();
+    pub fn load(&self, id: AggregateId) -> impl Future<Output = Result<Entity<S>, EL>> + Send + '_ {
         async move {
             let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory)
                 .await
@@ -318,14 +314,13 @@ where
     /// Execute a typed command via direct HList dispatch.
     pub fn execute<C, Idx>(
         &self,
-        id: &AggregateId,
+        id: AggregateId,
         cmd: C,
     ) -> impl Future<Output = Result<Entity<S>, EH>> + Send + '_
     where
         C: Command + Send + 'static,
         Handlers: HandleCommand<C, Idx, Ctx, S, EH>,
     {
-        let id = id.clone();
         async move {
             let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory)
                 .await

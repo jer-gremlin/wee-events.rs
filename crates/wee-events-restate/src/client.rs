@@ -132,7 +132,7 @@ where
 {
     type Error = Error;
 
-    async fn dispatch_command(&self, id: &AggregateId, cmd: C) -> Result<Entity<D::State>, Error> {
+    async fn dispatch_command(&self, id: AggregateId, cmd: C) -> Result<Entity<D::State>, Error> {
         let http = self.http.clone();
         let url = self.ingress_url.clone();
         let value = serde_json::to_value(&cmd)?;
@@ -140,7 +140,7 @@ where
             &http,
             &url,
             D::SERVICE_NAME,
-            id.clone(),
+            id,
             C::NAME.into(),
             value,
         )
@@ -163,9 +163,9 @@ where
 {
     type Error = Error;
 
-    async fn load(&self, id: &AggregateId) -> Result<Entity<D::State>, Error> {
+    async fn load(&self, id: AggregateId) -> Result<Entity<D::State>, Error> {
         let http = self.http.clone();
         let url = self.ingress_url.clone();
-        crate::generated::load::<D::State>(&http, &url, D::SERVICE_NAME, id.clone()).await
+        crate::generated::load::<D::State>(&http, &url, D::SERVICE_NAME, id).await
     }
 }

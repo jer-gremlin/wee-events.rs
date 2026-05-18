@@ -153,7 +153,7 @@ pub mod __private {
 
         fn dispatch_command(
             &self,
-            id: &AggregateId,
+            id: AggregateId,
             cmd: C,
         ) -> impl Future<Output = Result<Entity<Self::State>, Self::Error>> + Send;
     }
@@ -199,12 +199,12 @@ pub trait TypedService<S>: __private::ServiceState<State = S> + Send + Sync {
 
     fn load(
         &self,
-        id: &AggregateId,
+        id: AggregateId,
     ) -> impl core::future::Future<Output = Result<Entity<S>, Self::Error>> + Send;
 
     fn execute<C>(
         &self,
-        id: &AggregateId,
+        id: AggregateId,
         cmd: C,
     ) -> impl core::future::Future<
         Output = Result<Entity<S>, <Self as __private::DispatchCommand<C>>::Error>,
