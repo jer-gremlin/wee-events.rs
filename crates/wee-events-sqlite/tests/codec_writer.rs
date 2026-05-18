@@ -26,13 +26,10 @@ fn entity() -> Entity<Counter> {
 
 #[tokio::test]
 async fn sqlite_writer_encodes_typed_published_events_as_cbor() {
-    let store = SqliteEventStore::builder()
-        .in_memory()
-        .strategy(GlobalStrategy)
-        .encoding(Encoding::Cbor)
-        .open()
+    let store = SqliteEventStore::open_in_memory(GlobalStrategy)
         .await
-        .expect("store should open");
+        .expect("store should open")
+        .with_encoding(Encoding::Cbor);
 
     Publisher::new(&store)
         .publish(&entity(), vec![CounterEvent::Incremented { amount: 5 }])
@@ -58,10 +55,7 @@ async fn sqlite_writer_encodes_typed_published_events_as_cbor() {
 
 #[tokio::test]
 async fn sqlite_writer_can_remain_json_for_compatibility() {
-    let store = SqliteEventStore::builder()
-        .in_memory()
-        .strategy(GlobalStrategy)
-        .open()
+    let store = SqliteEventStore::open_in_memory(GlobalStrategy)
         .await
         .expect("store should open");
 

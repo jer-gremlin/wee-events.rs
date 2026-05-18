@@ -101,12 +101,7 @@ where
 {
     TempStore {
         _guard: TestStoreGuard::None,
-        store: SqliteEventStore::builder()
-            .in_memory()
-            .strategy(strategy)
-            .open()
-            .await
-            .unwrap(),
+        store: SqliteEventStore::open_in_memory(strategy).await.unwrap(),
     }
 }
 
@@ -115,10 +110,7 @@ where
     S: LocalPartitionStrategy + LocalStorePath,
 {
     let temp_dir = tempfile::tempdir().unwrap();
-    let store = SqliteEventStore::builder()
-        .local(S::local_store_path(&temp_dir))
-        .strategy(strategy)
-        .open()
+    let store = SqliteEventStore::open_local(S::local_store_path(&temp_dir), strategy)
         .await
         .unwrap();
 
@@ -320,12 +312,7 @@ async fn open_sqld_default_store_with_retry(
     let deadline = Instant::now() + Duration::from_secs(20);
 
     loop {
-        match SqliteEventStore::builder()
-            .sqld_default(provisioner.clone())
-            .strategy(strategy)
-            .open()
-            .await
-        {
+        match SqliteEventStore::open_sqld_default(provisioner.clone(), strategy).await {
             Ok(store) => return store,
             Err(error) => {
                 if Instant::now() >= deadline {
@@ -347,12 +334,7 @@ where
     let deadline = Instant::now() + Duration::from_secs(20);
 
     loop {
-        match SqliteEventStore::builder()
-            .sqld_namespaced(provisioner.clone())
-            .strategy(strategy.clone())
-            .open()
-            .await
-        {
+        match SqliteEventStore::open_sqld_namespaced(provisioner.clone(), strategy.clone()).await {
             Ok(store) => return store,
             Err(error) => {
                 if Instant::now() >= deadline {
@@ -575,12 +557,12 @@ fn turso_benchmarks(c: &mut Criterion) {
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let store = rt.block_on(async {
-        let store = SqliteEventStore::builder()
-            .turso(FixedRemoteTargetProvisioner { url, auth_token })
-            .strategy(GlobalStrategy)
-            .open()
-            .await
-            .unwrap();
+        let store = SqliteEventStore::open_turso(
+            FixedRemoteTargetProvisioner { url, auth_token },
+            GlobalStrategy,
+        )
+        .await
+        .unwrap();
         TempStore {
             _guard: TestStoreGuard::None,
             store,

@@ -14,10 +14,10 @@ async fn separate_store_instances_observe_each_others_commits() {
     let path = temp_dir.path().join("store.db");
     let aggregate_id = wee_events::AggregateId::new("order", "123");
 
-    let store_a = SqliteEventStore::open_with_strategy(&path, GlobalStrategy)
+    let store_a = SqliteEventStore::open_local(&path, GlobalStrategy)
         .await
         .expect("first store should open");
-    let store_b = SqliteEventStore::open_with_strategy(&path, GlobalStrategy)
+    let store_b = SqliteEventStore::open_local(&path, GlobalStrategy)
         .await
         .expect("second store should open");
 
@@ -58,10 +58,10 @@ async fn stale_revision_conflicts_across_store_instances() {
     let path = temp_dir.path().join("store.db");
     let aggregate_id = wee_events::AggregateId::new("order", "123");
 
-    let store_a = SqliteEventStore::open_with_strategy(&path, GlobalStrategy)
+    let store_a = SqliteEventStore::open_local(&path, GlobalStrategy)
         .await
         .expect("first store should open");
-    let store_b = SqliteEventStore::open_with_strategy(&path, GlobalStrategy)
+    let store_b = SqliteEventStore::open_local(&path, GlobalStrategy)
         .await
         .expect("second store should open");
 

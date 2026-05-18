@@ -134,14 +134,12 @@ async fn enumerate_after_restart_uses_logical_partition_name_not_backend_name() 
     let provisioner = SuffixedLocalProvisioner::new(temp_dir.path());
     let aggregate_id = AggregateId::new("invoice", "tenant/acme:123");
 
-    let store = SqliteEventStore::builder()
-        .sqld_namespaced(provisioner.clone())
-        .strategy(PartitionByStrategy::new(
-            partition_by_tenant as fn(&AggregateId) -> String,
-        ))
-        .open()
-        .await
-        .expect("store should open");
+    let store = SqliteEventStore::open_sqld_namespaced(
+        provisioner.clone(),
+        PartitionByStrategy::new(partition_by_tenant as fn(&AggregateId) -> String),
+    )
+    .await
+    .expect("store should open");
 
     store
         .publish(
@@ -157,14 +155,12 @@ async fn enumerate_after_restart_uses_logical_partition_name_not_backend_name() 
 
     drop(store);
 
-    let reopened = SqliteEventStore::builder()
-        .sqld_namespaced(provisioner)
-        .strategy(PartitionByStrategy::new(
-            partition_by_tenant as fn(&AggregateId) -> String,
-        ))
-        .open()
-        .await
-        .expect("store should reopen");
+    let reopened = SqliteEventStore::open_sqld_namespaced(
+        provisioner,
+        PartitionByStrategy::new(partition_by_tenant as fn(&AggregateId) -> String),
+    )
+    .await
+    .expect("store should reopen");
 
     let ids = reopened
         .enumerate_aggregates()
@@ -181,10 +177,7 @@ async fn rejects_distinct_logical_partitions_that_alias_to_the_same_target() {
     let first = AggregateId::new("tenant/acme", "123");
     let second = AggregateId::new("tenant:acme", "456");
 
-    let store = SqliteEventStore::builder()
-        .sqld_namespaced(provisioner)
-        .strategy(TypeStrategy)
-        .open()
+    let store = SqliteEventStore::open_sqld_namespaced(provisioner, TypeStrategy)
         .await
         .expect("store should open");
 
