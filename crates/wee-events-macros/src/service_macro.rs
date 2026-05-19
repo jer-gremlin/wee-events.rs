@@ -116,7 +116,7 @@ impl LoaderEntry {
 
 /// The two forms accepted by `service!`:
 ///
-/// - **DefinitionOnly**: `pub Name("logical") for State [Cmd, ...]`
+/// - **`DefinitionOnly`**: `pub Name("logical") for State [Cmd, ...]`
 ///   Emits only `ServiceDefinition` + `HasCommand<C>` impls.
 ///
 /// - **Full**: `pub Name for State { loader: .., handlers: [..] }`
@@ -378,9 +378,7 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     // Effective Restate method name for the loader.
     let loader_wire_name = loader_entry
         .wire_name
-        .as_ref()
-        .map(|l| l.value())
-        .unwrap_or_else(|| "load".to_string());
+        .as_ref().map_or_else(|| "load".to_string(), syn::LitStr::value);
 
     // Effective Restate method name for each handler, in input order.
     let handler_wire_names: Vec<String> = handler_entries

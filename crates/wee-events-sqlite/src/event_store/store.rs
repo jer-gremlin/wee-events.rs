@@ -795,8 +795,8 @@ async fn execute_publish_statement(
     tx: &libsql::Transaction,
     row: PublishRow<'_>,
 ) -> Result<u64, Error> {
-    let causation = row.metadata.causation_id.as_ref().map(|id| id.as_str());
-    let correlation = row.metadata.correlation_id.as_ref().map(|id| id.as_str());
+    let causation = row.metadata.causation_id.as_ref().map(wee_events::EventId::as_str);
+    let correlation = row.metadata.correlation_id.as_ref().map(wee_events::CorrelationId::as_str);
 
     match (row.index, &row.options.expected_revision) {
         (0, Some(expected)) if expected.is_zero() => tx

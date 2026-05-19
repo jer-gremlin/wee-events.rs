@@ -19,6 +19,7 @@ pub struct Aggregate {
 
 impl Aggregate {
     /// Creates an empty aggregate with no events.
+    #[must_use]
     pub fn empty(id: AggregateId) -> Self {
         Self {
             id,
@@ -38,6 +39,7 @@ impl Aggregate {
     /// Constructs an aggregate from already-shared events. Use this path
     /// when the caller (e.g. an in-memory store) already holds `Arc`-wrapped
     /// events — no allocation occurs.
+    #[must_use]
     pub fn from_shared_events(id: AggregateId, events: Vec<Arc<RecordedEvent>>) -> Self {
         let revision = match events.last() {
             Some(e) => e.revision.clone(),
@@ -53,11 +55,13 @@ impl Aggregate {
     /// The recorded events in this aggregate's stream, as a slice of shared
     /// references. Most consumers iterate `for event in agg.events()` and
     /// access fields via auto-deref through `Arc<RecordedEvent>`.
+    #[must_use]
     pub fn events(&self) -> &[Arc<RecordedEvent>] {
         &self.events
     }
 
     /// The current revision of this aggregate.
+    #[must_use]
     pub fn revision(&self) -> &Revision {
         &self.revision
     }
@@ -65,6 +69,7 @@ impl Aggregate {
     /// Consumes the aggregate and returns owned events. Deep-clones each
     /// event because callers historically expected `Vec<RecordedEvent>`;
     /// prefer [`Self::into_shared_events`] in new code.
+    #[must_use]
     pub fn into_events(self) -> Vec<RecordedEvent> {
         self.events
             .into_iter()
@@ -73,22 +78,26 @@ impl Aggregate {
     }
 
     /// Consumes the aggregate and returns the shared-event vec. Cheap.
+    #[must_use]
     pub fn into_shared_events(self) -> Vec<Arc<RecordedEvent>> {
         self.events
     }
 
     /// Consumes the aggregate, returning `(id, events, revision)`. The
     /// renderer uses this to move identifiers into `Entity` without cloning.
+    #[must_use]
     pub fn into_parts(self) -> (AggregateId, Vec<Arc<RecordedEvent>>, Revision) {
         (self.id, self.events, self.revision)
     }
 
     /// Returns true if this aggregate has no recorded events.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
 
     /// Returns the number of events in the stream.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.events.len()
     }

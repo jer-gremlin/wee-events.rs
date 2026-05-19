@@ -106,7 +106,7 @@ where
 /// Hidden implementation details used by generated code.
 #[doc(hidden)]
 pub mod __private {
-    use super::*;
+    use super::{AggregateId, Entity};
     use core::future::Future;
 
     /// Marker trait that associates a service with its state type via an

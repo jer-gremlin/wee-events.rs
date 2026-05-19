@@ -34,6 +34,7 @@ struct MemoryStoreBacking {
 }
 
 impl MemoryStore {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             backing: Arc::new(MemoryStoreBacking::new()),
@@ -57,7 +58,7 @@ impl MemoryStore {
         Ok(out)
     }
 
-    /// Synchronous load helper. Briefly holds the DashMap shard read lock to
+    /// Synchronous load helper. Briefly holds the `DashMap` shard read lock to
     /// clone the per-aggregate `Arc<RwLock<…>>`; the per-aggregate read guard
     /// is taken after the shard lock is released, so concurrent loads of
     /// shard-mate aggregates never wait on each other's writes.
@@ -119,19 +120,15 @@ impl MemoryStore {
         // yet and the caller demanded a non-zero expected_revision, fail
         // *before* inserting an empty entry — otherwise a failed publish
         // leaves a phantom aggregate visible to `enumerate_aggregates()`.
-        let stream = match self.backing.streams.get(aggregate_id) {
-            Some(e) => Arc::clone(e.value()),
-            None => {
-                if let Some(expected) = &options.expected_revision {
-                    if !expected.is_zero() {
-                        return Err(Error::RevisionConflict {
-                            expected: expected.clone(),
-                            actual: Revision::zero(),
-                        });
-                    }
+        let stream = if let Some(e) = self.backing.streams.get(aggregate_id) { Arc::clone(e.value()) } else {
+            if let Some(expected) = &options.expected_revision
+                && !expected.is_zero() {
+                    return Err(Error::RevisionConflict {
+                        expected: expected.clone(),
+                        actual: Revision::zero(),
+                    });
                 }
-                self.stream_for(aggregate_id)
-            }
+            self.stream_for(aggregate_id)
         };
         let mut events_guard = stream.write();
 
@@ -208,6 +205,7 @@ impl Default for MemoryStoreBacking {
 
 impl MemoryStore {
     /// Returns all distinct aggregate IDs in the store.
+    #[must_use]
     pub fn enumerate_aggregates(&self) -> Vec<AggregateId> {
         self.backing
             .streams
@@ -217,6 +215,7 @@ impl MemoryStore {
     }
 
     /// Returns all distinct aggregate IDs of a given type.
+    #[must_use]
     pub fn enumerate_aggregates_by_type(&self, aggregate_type: &AggregateType) -> Vec<AggregateId> {
         self.backing
             .streams

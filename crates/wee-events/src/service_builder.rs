@@ -1,5 +1,3 @@
-#![allow(private_bounds, private_interfaces)]
-
 //! Portable async-factory runtime for building typed services.
 //!
 //! Provides a `ServiceBuilder<S>` that accumulates a loader function and typed
@@ -302,39 +300,35 @@ where
     for<'a> &'a F: FactoryBridge<'a, Ctx>,
 {
     /// Load the current entity state. Calls the factory then the loader.
-    pub fn load(&self, id: AggregateId) -> impl Future<Output = Result<Entity<S>, EL>> + Send + '_ {
-        async move {
-            let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory)
-                .await
-                .map_err(EL::from)?;
-            <&L as LoaderBridge<'_, Ctx, S, EL>>::call(&self.loader, &ctx, &id).await
-        }
+    pub async fn load(&self, id: AggregateId) -> Result<Entity<S>, EL> {
+        let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory)
+            .await
+            .map_err(EL::from)?;
+        <&L as LoaderBridge<'_, Ctx, S, EL>>::call(&self.loader, &ctx, &id).await
     }
 
-    /// Execute a typed command via direct HList dispatch.
-    pub fn execute<C, Idx>(
+    /// Execute a typed command via direct `HList` dispatch.
+    pub async fn execute<C, Idx>(
         &self,
         id: AggregateId,
         cmd: C,
-    ) -> impl Future<Output = Result<Entity<S>, EH>> + Send + '_
+    ) -> Result<Entity<S>, EH>
     where
         C: Command + Send + 'static,
         Handlers: HandleCommand<C, Idx, Ctx, S, EH>,
     {
-        async move {
-            let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory)
-                .await
-                .map_err(EH::from)?;
-            let entity = <&L as LoaderBridge<'_, Ctx, S, EL>>::call(&self.loader, &ctx, &id)
-                .await
-                .map_err(EH::from)?;
-            match self.handlers.handle(&ctx, &entity, cmd).await? {
-                HandlerOutcome::Entity(entity) => Ok(entity),
-                HandlerOutcome::Reload => {
-                    <&L as LoaderBridge<'_, Ctx, S, EL>>::call(&self.loader, &ctx, &id)
-                        .await
-                        .map_err(EH::from)
-                }
+        let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory)
+            .await
+            .map_err(EH::from)?;
+        let entity = <&L as LoaderBridge<'_, Ctx, S, EL>>::call(&self.loader, &ctx, &id)
+            .await
+            .map_err(EH::from)?;
+        match self.handlers.handle(&ctx, &entity, cmd).await? {
+            HandlerOutcome::Entity(entity) => Ok(entity),
+            HandlerOutcome::Reload => {
+                <&L as LoaderBridge<'_, Ctx, S, EL>>::call(&self.loader, &ctx, &id)
+                    .await
+                    .map_err(EH::from)
             }
         }
     }
@@ -378,6 +372,7 @@ impl<S, EL, EH> ServiceBuilder<S, (), EmptyHandlers, EL, EH> {
     /// Create a new builder with no loader and no handlers registered.
     ///
     /// `EL` / `EH` are left free for inference from registered functions.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             loader: (),

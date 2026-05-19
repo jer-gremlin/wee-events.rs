@@ -29,11 +29,13 @@ impl StoreValidationEvent {
 }
 
 /// Creates a test aggregate id with a unique key.
+#[must_use]
 pub fn make_test_aggregate_id() -> AggregateId {
     AggregateId::new("test", ulid::Ulid::new().to_string())
 }
 
 /// Creates a test event with random-ish data.
+#[must_use]
 pub fn make_test_event(index: usize) -> StoreValidationEvent {
     StoreValidationEvent {
         test_string_value: format!("test-value-{}-{}", index, ulid::Ulid::new()),
@@ -42,6 +44,7 @@ pub fn make_test_event(index: usize) -> StoreValidationEvent {
 }
 
 /// Serializes a test event into a `RawEvent` with JSON encoding.
+#[must_use]
 pub fn make_raw_event(event: &StoreValidationEvent) -> RawEvent {
     RawEvent {
         event_type: EventType::new(StoreValidationEvent::EVENT_TYPE),

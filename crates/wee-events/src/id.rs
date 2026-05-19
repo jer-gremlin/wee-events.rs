@@ -92,14 +92,17 @@ impl Revision {
     }
 
     /// The zero revision — represents "no events yet."
+    #[must_use]
     pub fn zero() -> Self {
         Self(zero_revision_arc())
     }
 
+    #[must_use]
     pub fn is_zero(&self) -> bool {
         &*self.0 == ZERO_REVISION
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -178,10 +181,12 @@ impl AggregateId {
         }
     }
 
+    #[must_use]
     pub fn aggregate_type(&self) -> &AggregateType {
         &self.aggregate_type
     }
 
+    #[must_use]
     pub fn aggregate_key(&self) -> &str {
         &self.aggregate_key
     }
@@ -255,6 +260,7 @@ impl AggregateType {
         Self(Arc::from(s.into()))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }

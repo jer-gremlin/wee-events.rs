@@ -55,7 +55,7 @@ where
     S: serde::de::DeserializeOwned,
 {
     let loader = names::loader_name(service_name);
-    let url = format!("{}/{}/load", ingress_url, loader);
+    let url = format!("{ingress_url}/{loader}/load");
 
     let resp = http.post(&url).json(&id).send().await?;
 
@@ -96,7 +96,7 @@ where
         },
     };
 
-    let url = format!("{}/{}/{}/run", ingress_url, executor, correlation_id);
+    let url = format!("{ingress_url}/{executor}/{correlation_id}/run");
 
     let resp = http.post(&url).json(&request).send().await?;
 

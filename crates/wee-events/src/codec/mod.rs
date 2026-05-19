@@ -34,6 +34,7 @@ pub enum Encoding {
 impl Encoding {
     /// The MIME-style identifier written into [`EventData::encoding`].
     #[inline]
+    #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Encoding::Json => json::ENCODING,

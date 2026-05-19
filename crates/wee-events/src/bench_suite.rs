@@ -5,10 +5,10 @@
 //! organized into groups that isolate specific costs:
 //!
 //! - **creation** — first write to a new aggregate (includes partition provisioning)
-//! - **steady_state** — writes to existing aggregates
-//! - **load_scaling** — reads scaling by event count
-//! - **partition_write** — concurrent writes spread across vs concentrated in partitions
-//! - **partition_read** — concurrent reads spread across vs concentrated in partitions
+//! - **`steady_state`** — writes to existing aggregates
+//! - **`load_scaling`** — reads scaling by event count
+//! - **`partition_write`** — concurrent writes spread across vs concentrated in partitions
+//! - **`partition_read`** — concurrent reads spread across vs concentrated in partitions
 //!
 //! # Usage
 //!
@@ -62,13 +62,13 @@ fn next_unique() -> String {
 
 /// Creates an aggregate ID guaranteed to be in a unique partition for most
 /// strategies. Each call with a different `index` produces a different
-/// aggregate type, which TypeStrategy maps to a distinct partition.
+/// aggregate type, which `TypeStrategy` maps to a distinct partition.
 fn make_spread_id(index: usize) -> AggregateId {
     AggregateId::new(format!("spread-{index}"), next_unique())
 }
 
 /// Creates an aggregate ID that shares a single aggregate type with all other
-/// concentrated IDs. TypeStrategy maps these to the same partition.
+/// concentrated IDs. `TypeStrategy` maps these to the same partition.
 fn make_concentrated_id() -> AggregateId {
     AggregateId::new("concentrated", next_unique())
 }

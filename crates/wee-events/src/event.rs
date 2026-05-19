@@ -28,12 +28,14 @@ impl EventData {
     }
 
     /// Creates an `EventData` from raw bytes with a given encoding.
+    #[must_use]
     pub fn raw(encoding: Encoding, data: Vec<u8>) -> Self {
         Self { encoding, data }
     }
 
     /// Returns true if this payload is JSON-encoded.
     #[inline]
+    #[must_use]
     pub fn is_json(&self) -> bool {
         matches!(self.encoding, Encoding::Json)
     }
@@ -49,7 +51,7 @@ impl EventData {
 /// sees concrete domain event types, only `EventType` + `EventData`.
 ///
 /// Not `Serialize`/`Deserialize` — stores decompose into columns/fields.
-/// Shared stores (NATS, DynamoDB) will add Go-compatible JSON serialization.
+/// Shared stores (NATS, `DynamoDB`) will add Go-compatible JSON serialization.
 #[derive(Debug, Clone)]
 pub struct RecordedEvent {
     pub event_id: EventId,
