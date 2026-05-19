@@ -2,8 +2,11 @@
 //!
 //! Provides a `ServiceBuilder<S>` that accumulates a loader function and typed
 //! handler functions. The `.build(factory)` method produces a `BuiltService`
-//! that has `load` and `execute` methods. All dispatch is fully static —
-//! no type erasure, no `Box<dyn Any>`, no `TypeId`.
+//! that has `load` and `execute` methods. Dispatch is static (no `Box<dyn Any>`,
+//! no `TypeId`) — `HandleCommand<C, Idx, ...>` resolves at compile time to a
+//! concrete impl. The futures the resolved handlers return *are* `BoxFuture`,
+//! which is a runtime allocation per handler call; see the `HandlerBridge`
+//! header below for why.
 //!
 //! ## Error model
 //!
@@ -48,7 +51,14 @@ use crate::entity::Entity;
 use crate::id::AggregateId;
 
 // ---------------------------------------------------------------------------
-// Erased future type alias — BoxFuture for lifetime management only, not type erasure
+// Erased future type alias.
+//
+// `Pin<Box<dyn Future + Send + 'a>>` — this *is* type erasure of the future,
+// plus a heap allocation per call. The dispatch (which `Fn` runs, which
+// `HandleCommand` impl) stays static; only the future the resolved `Fn`
+// returns is erased and boxed. The reason for the box: Rust can't express
+// `F: for<'a> Fn(&'a Ctx, ...) -> impl Future<Output = ...> + 'a` directly,
+// so the bridge impls below box the future to carry the borrow lifetime.
 // ---------------------------------------------------------------------------
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
