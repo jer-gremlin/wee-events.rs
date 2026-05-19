@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use crate::aggregate::Aggregate;
 use crate::codec::DecodeError;
 use crate::entity::Entity;
@@ -106,77 +104,63 @@ where
     }
 }
 
+/// Action taken when a rule matches: reduce the event, or skip it.
+enum Action<S, E> {
+    Reduce(ReduceFn<S, E>),
+    Ignore,
+}
+
 /// Stateless projection engine. Folds an aggregate's event stream through
-/// registered reducers to produce an `Entity<S>`.
+/// registered rules to produce an `Entity<S>`.
 ///
-/// Entity rendering is strict: event types without a reducer fail rendering
-/// unless explicitly ignored.
+/// # Precedence
+///
+/// Rules are walked in registration order; the **first matching** rule
+/// fires. Register more-specific patterns before more-general ones, exactly
+/// like `match` arms:
+///
+/// ```ignore
+/// Renderer::new()
+///     .with("counter:legacy", legacy_reducer)        // exact, registered first
+///     .with(EventPattern::glob("counter:*"), reduce) // glob, fallback
+///     .ignore(EventPattern::glob("audit:*"))         // skip noise
+/// ```
+///
+/// Entity rendering is strict: events with no matching rule fail rendering.
 pub struct Renderer<S, E = DecodeError> {
-    reducers: HashMap<EventType, ReduceFn<S, E>>,
-    pattern_reducers: Vec<(EventPattern, ReduceFn<S, E>)>,
-    ignored: HashSet<EventType>,
-    ignored_patterns: Vec<EventPattern>,
+    rules: Vec<(EventPattern, Action<S, E>)>,
 }
 
 impl<S: Default, E> Renderer<S, E> {
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            reducers: HashMap::new(),
-            pattern_reducers: Vec::new(),
-            ignored: HashSet::new(),
-            ignored_patterns: Vec::new(),
-        }
+        Self { rules: Vec::new() }
     }
 
-    /// Registers a reducer for a given event type or pattern.
-    ///
-    /// Plain strings are exact matches. Use [`EventPattern::glob`] for
-    /// wildcard matching.
+    /// Registers a reducer for an event type or pattern. Earlier registrations
+    /// take precedence; see [`Renderer`] for full semantics.
     #[must_use]
     pub fn with(mut self, pattern: impl Into<EventPattern>, reducer: ReduceFn<S, E>) -> Self {
-        match pattern.into() {
-            EventPattern::Exact(event_type) => {
-                self.reducers.insert(event_type, reducer);
-            }
-            pattern @ EventPattern::Glob(_) => self.pattern_reducers.push((pattern, reducer)),
-        }
+        self.rules.push((pattern.into(), Action::Reduce(reducer)));
         self
     }
 
-    /// Registers a reducer for a given event type or pattern (mutating).
+    /// Mutating sibling of [`with`](Self::with).
     pub fn register(&mut self, pattern: impl Into<EventPattern>, reducer: ReduceFn<S, E>) {
-        match pattern.into() {
-            EventPattern::Exact(event_type) => {
-                self.reducers.insert(event_type, reducer);
-            }
-            pattern @ EventPattern::Glob(_) => self.pattern_reducers.push((pattern, reducer)),
-        }
+        self.rules.push((pattern.into(), Action::Reduce(reducer)));
     }
 
-    /// Explicitly ignores matching event types during rendering.
-    ///
-    /// Plain strings are exact matches. Use [`EventPattern::glob`] for
-    /// wildcard matching.
+    /// Registers a skip rule for an event type or pattern. Earlier registrations
+    /// take precedence; see [`Renderer`] for full semantics.
     #[must_use]
     pub fn ignore(mut self, pattern: impl Into<EventPattern>) -> Self {
-        match pattern.into() {
-            EventPattern::Exact(event_type) => {
-                self.ignored.insert(event_type);
-            }
-            pattern @ EventPattern::Glob(_) => self.ignored_patterns.push(pattern),
-        }
+        self.rules.push((pattern.into(), Action::Ignore));
         self
     }
 
-    /// Explicitly ignores matching event types during rendering (mutating).
+    /// Mutating sibling of [`ignore`](Self::ignore).
     pub fn register_ignore(&mut self, pattern: impl Into<EventPattern>) {
-        match pattern.into() {
-            EventPattern::Exact(event_type) => {
-                self.ignored.insert(event_type);
-            }
-            pattern @ EventPattern::Glob(_) => self.ignored_patterns.push(pattern),
-        }
+        self.rules.push((pattern.into(), Action::Ignore));
     }
 
     //TODO: work out a way to make this work with some kinda call to Fold<T> .i.e .fold(||{}) so it's more rusty..
@@ -185,48 +169,32 @@ impl<S: Default, E> Renderer<S, E> {
     /// Consumes the aggregate so its `AggregateId` and `Revision` move into
     /// the resulting `Entity` without cloning. Callers that need the
     /// aggregate after rendering should clone it first.
-    ///
-    /// Unhandled event types fail rendering unless explicitly ignored.
     pub fn render(&self, aggregate: Aggregate) -> Result<Entity<S>, RenderError<E>> {
         let mut state = S::default();
         let (id, events, revision) = aggregate.into_parts();
 
         for event in &events {
-            if let Some(reducer) = self.reducers.get(&event.event_type) {
-                reducer(&mut state, &event.event_type, &event.data).map_err(|source| {
-                    RenderError::ApplyFailed {
-                        context: Box::new(RenderEventContext::new(&id, event.as_ref())),
-                        source,
-                    }
-                })?;
-                continue;
-            }
-            if self.ignored.contains(&event.event_type) {
-                continue;
-            }
-            if let Some((_, reducer)) = self
-                .pattern_reducers
+            let action = self
+                .rules
                 .iter()
                 .find(|(pattern, _)| pattern.matches(&event.event_type))
-            {
-                reducer(&mut state, &event.event_type, &event.data).map_err(|source| {
-                    RenderError::ApplyFailed {
+                .map(|(_, action)| action);
+            match action {
+                Some(Action::Reduce(reducer)) => {
+                    reducer(&mut state, &event.event_type, &event.data).map_err(|source| {
+                        RenderError::ApplyFailed {
+                            context: Box::new(RenderEventContext::new(&id, event.as_ref())),
+                            source,
+                        }
+                    })?;
+                }
+                Some(Action::Ignore) => {}
+                None => {
+                    return Err(RenderError::UnhandledEventType {
                         context: Box::new(RenderEventContext::new(&id, event.as_ref())),
-                        source,
-                    }
-                })?;
-                continue;
+                    });
+                }
             }
-            if self
-                .ignored_patterns
-                .iter()
-                .any(|pattern| pattern.matches(&event.event_type))
-            {
-                continue;
-            }
-            return Err(RenderError::UnhandledEventType {
-                context: Box::new(RenderEventContext::new(&id, event.as_ref())),
-            });
         }
 
         Ok(Entity {
@@ -285,5 +253,84 @@ fn glob_matches(pattern: &str, text: &str) -> bool {
 impl<S: Default, E> Default for Renderer<S, E> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod precedence_tests {
+    use super::{Aggregate, EventPattern, Renderer};
+    use crate::codec::{DecodeError, Encoding};
+    use crate::event::RecordedEvent;
+    use crate::id::{AggregateId, EventId, EventType, Revision};
+
+    #[derive(Default)]
+    struct State {
+        legacy_hits: u32,
+        glob_hits: u32,
+    }
+
+    fn legacy_reducer(
+        s: &mut State,
+        _t: &EventType,
+        _d: &crate::event::EventData,
+    ) -> Result<(), DecodeError> {
+        s.legacy_hits += 1;
+        Ok(())
+    }
+
+    fn glob_reducer(
+        s: &mut State,
+        _t: &EventType,
+        _d: &crate::event::EventData,
+    ) -> Result<(), DecodeError> {
+        s.glob_hits += 1;
+        Ok(())
+    }
+
+    fn aggregate_with_event(event_type: &str) -> Aggregate {
+        Aggregate::from_events(
+            AggregateId::new("counter", "p"),
+            vec![RecordedEvent {
+                event_id: EventId::new("event-1"),
+                event_type: EventType::new(event_type),
+                revision: Revision::generate(),
+                metadata: Default::default(),
+                data: Encoding::Json.encode(&serde_json::json!({})).unwrap(),
+            }],
+        )
+    }
+
+    #[test]
+    fn earlier_specific_rule_beats_later_glob() {
+        let renderer = Renderer::<State>::new()
+            .with("counter:legacy", legacy_reducer)
+            .with(EventPattern::glob("counter:*").unwrap(), glob_reducer);
+        let entity = renderer.render(aggregate_with_event("counter:legacy")).unwrap();
+        assert_eq!(entity.state.legacy_hits, 1);
+        assert_eq!(entity.state.glob_hits, 0);
+    }
+
+    #[test]
+    fn earlier_ignore_beats_later_reducer() {
+        let renderer = Renderer::<State>::new()
+            .ignore(EventPattern::glob("counter:legacy-*").unwrap())
+            .with(EventPattern::glob("counter:*").unwrap(), glob_reducer);
+        let entity = renderer.render(aggregate_with_event("counter:legacy-reset")).unwrap();
+        assert_eq!(entity.state.glob_hits, 0, "earlier ignore should skip");
+    }
+
+    #[test]
+    fn earlier_reducer_beats_later_ignore() {
+        let renderer = Renderer::<State>::new()
+            .with("counter:legacy", legacy_reducer)
+            .ignore(EventPattern::glob("counter:legacy*").unwrap());
+        let entity = renderer.render(aggregate_with_event("counter:legacy")).unwrap();
+        assert_eq!(entity.state.legacy_hits, 1, "earlier reducer should fire");
+    }
+
+    #[test]
+    fn no_matching_rule_fails() {
+        let renderer = Renderer::<State>::new().with("counter:other", legacy_reducer);
+        assert!(renderer.render(aggregate_with_event("counter:unhandled")).is_err());
     }
 }
