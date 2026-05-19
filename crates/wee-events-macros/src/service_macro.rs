@@ -531,7 +531,6 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
                         ::std::convert::From<
                             <#loader_spec_path as ::wee_events::LoaderRuntimeSpec<__Store>>::Error,
                         >
-                        + ::std::convert::From<::wee_events::Error>
                         + ::std::marker::Send
                         + ::std::marker::Sync
                         + 'static,
