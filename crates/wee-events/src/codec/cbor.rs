@@ -1,6 +1,6 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::{DecodeError, EncodeError, EventDecoder, EventEncoder};
+use super::{DecodeError, EncodeError, Encoding, EventDecoder, EventEncoder};
 use crate::event::EventData;
 
 pub const ENCODING: &str = "application/cbor";
@@ -21,7 +21,7 @@ impl EventEncoder for Encoder {
     {
         let mut data = Vec::new();
         ciborium::into_writer(value, &mut data)?;
-        Ok(EventData::raw(ENCODING, data))
+        Ok(EventData::raw(Encoding::Cbor, data))
     }
 }
 
@@ -33,10 +33,10 @@ impl EventDecoder for Decoder {
     where
         T: DeserializeOwned,
     {
-        if data.encoding != ENCODING {
+        if !matches!(data.encoding, Encoding::Cbor) {
             return Err(DecodeError::EncodingMismatch {
-                expected: ENCODING.to_string(),
-                actual: data.encoding.to_string(),
+                expected: Encoding::Cbor,
+                actual: data.encoding,
             });
         }
         ciborium::from_reader(data.data.as_slice()).map_err(DecodeError::Cbor)

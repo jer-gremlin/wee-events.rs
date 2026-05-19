@@ -3,7 +3,6 @@
 use serde::{Deserialize, Serialize};
 use wee_events::{
     AggregateId, DomainEvent, Encoding, Entity, EventStore as _, Publisher, Revision,
-    encoding::{cbor, json},
 };
 use wee_events_sqlite::{GlobalStrategy, SqliteEventStore};
 
@@ -42,11 +41,11 @@ async fn sqlite_writer_encodes_typed_published_events_as_cbor() {
         .expect("load should work");
     let recorded = &aggregate.events()[0];
 
-    assert_eq!(recorded.data.encoding, cbor::ENCODING);
+    assert_eq!(recorded.data.encoding, Encoding::Cbor);
 
-    let encoding = Encoding::from_encoding_str(&recorded.data.encoding)
-        .expect("encoding string should map to a supported variant");
-    let decoded: CounterEvent = encoding
+    let decoded: CounterEvent = recorded
+        .data
+        .encoding
         .decode(&recorded.data)
         .expect("consumer decoder should decode cbor");
 
@@ -68,5 +67,5 @@ async fn sqlite_writer_can_remain_json_for_compatibility() {
         .load(&AggregateId::new("counter", "codec"))
         .await
         .expect("load should work");
-    assert_eq!(aggregate.events()[0].data.encoding, json::ENCODING);
+    assert_eq!(aggregate.events()[0].data.encoding, Encoding::Json);
 }

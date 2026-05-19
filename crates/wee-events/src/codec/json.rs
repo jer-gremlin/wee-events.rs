@@ -1,6 +1,6 @@
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::{DecodeError, EncodeError, EventDecoder, EventEncoder};
+use super::{DecodeError, EncodeError, Encoding, EventDecoder, EventEncoder};
 use crate::event::EventData;
 
 pub const ENCODING: &str = "application/json";
@@ -19,7 +19,7 @@ impl EventEncoder for Encoder {
     where
         T: Serialize,
     {
-        Ok(EventData::raw(ENCODING, serde_json::to_vec(value)?))
+        Ok(EventData::raw(Encoding::Json, serde_json::to_vec(value)?))
     }
 }
 
@@ -31,10 +31,10 @@ impl EventDecoder for Decoder {
     where
         T: DeserializeOwned,
     {
-        if data.encoding != ENCODING {
+        if !matches!(data.encoding, Encoding::Json) {
             return Err(DecodeError::EncodingMismatch {
-                expected: ENCODING.to_string(),
-                actual: data.encoding.to_string(),
+                expected: Encoding::Json,
+                actual: data.encoding,
             });
         }
         serde_json::from_slice(&data.data).map_err(DecodeError::Json)

@@ -103,7 +103,10 @@ where
     fn from(err: DeserializeJsonError) -> Self {
         match err {
             DeserializeJsonError::EncodingMismatch { expected, actual } => {
-                ServiceError::Store(E::from(crate::Error::EncodingMismatch { expected, actual }))
+                ServiceError::Store(E::from(crate::Error::EncodingMismatch {
+                    expected: expected.as_str().to_string(),
+                    actual: actual.as_str().to_string(),
+                }))
             }
             DeserializeJsonError::Decode(e) => {
                 ServiceError::Codec(crate::CodecError::Decode(crate::DecodeError::Json(e)))
