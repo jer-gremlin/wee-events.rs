@@ -17,10 +17,11 @@
 //!
 //! Splitting them lets a service have a loader that fails with one error type
 //! (commonly the store's error or a [`crate::ServiceError`] over it) and
-//! handlers that fail with a richer service error. `EH: From<EL>` so loader
-//! failures during `execute` flow into the handler error naturally; both must
-//! be `From<crate::Error>` so factory failures (which produce `crate::Error`)
-//! convert into either side.
+//! handlers that fail with a richer service error. The error path is one-way:
+//! `crate::Error` enters via `EL: From<crate::Error>` (factory + loader
+//! failures), then `EH: From<EL>` lifts those into the handler-error world.
+//! There is no direct `EH: From<crate::Error>` bound — that would create a
+//! second path with potentially different semantics from the EL-mediated one.
 //!
 //! Defaults are `EL = crate::Error` and `EH = EL`, preserving the historical
 //! single-`crate::Error` contract for callers that haven't migrated.
@@ -157,14 +158,18 @@ where
 /// remain pinned to `crate::Result<Ctx>` — context construction is an
 /// infrastructure concern.
 ///
-/// **Failure surface:** factory failures are converted into the loader's
-/// `EL` (and the handler's `EH`) via the `From<crate::Error>` bound on each.
-/// When `EL = ServiceError<E>`, that route lands in `ServiceError::Store(E::from(crate::Error))`,
-/// so a context-construction failure is indistinguishable from a store-load
-/// failure to the caller. This is intentional — the loader contract treats
-/// "couldn't get a context" and "couldn't load the aggregate" as equally
-/// fatal infrastructure conditions — but worth knowing if you're triaging
-/// errors at the service boundary.
+/// **Failure surface:** factory failures convert into `EL` via
+/// `EL: From<crate::Error>`; `execute` then lifts that `EL` into `EH` via
+/// `EH: From<EL>`. There is no direct `crate::Error → EH` route — every
+/// factory or loader failure travels the same `crate::Error → EL → EH`
+/// path, so behaviour is independent of which `From` impl callers chose to
+/// write. When `EL = ServiceError<E>`, that route lands in
+/// `ServiceError::Store(E::from(crate::Error))`, so a context-construction
+/// failure is indistinguishable from a store-load failure to the caller.
+/// This is intentional — the loader contract treats "couldn't get a context"
+/// and "couldn't load the aggregate" as equally fatal infrastructure
+/// conditions — but worth knowing if you're triaging errors at the service
+/// boundary.
 #[doc(hidden)]
 pub trait FactoryBridge<'a, Ctx>: Sized {
     fn call(f: Self) -> BoxFuture<'a, crate::Result<Ctx>>;
@@ -305,7 +310,7 @@ where
     F: Send + Sync + 'static,
     Handlers: Send + Sync + 'static,
     EL: From<crate::Error> + Send + Sync + 'static,
-    EH: From<crate::Error> + From<EL> + Send + Sync + 'static,
+    EH: From<EL> + Send + Sync + 'static,
     for<'a> &'a L: LoaderBridge<'a, Ctx, S, EL>,
     for<'a> &'a F: FactoryBridge<'a, Ctx>,
 {
@@ -329,6 +334,7 @@ where
     {
         let ctx = <&F as FactoryBridge<'_, Ctx>>::call(&self.factory)
             .await
+            .map_err(EL::from)
             .map_err(EH::from)?;
         let entity = <&L as LoaderBridge<'_, Ctx, S, EL>>::call(&self.loader, &ctx, &id)
             .await
