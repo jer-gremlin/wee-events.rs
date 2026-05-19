@@ -26,6 +26,7 @@ pub mod cbor;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Encoding {
     Json,
+
     #[cfg(feature = "cbor")]
     Cbor,
 }
@@ -49,10 +50,12 @@ impl Encoding {
         if s == json::ENCODING {
             return Ok(Encoding::Json);
         }
+
         #[cfg(feature = "cbor")]
         if s == cbor::ENCODING {
             return Ok(Encoding::Cbor);
         }
+
         Err(DecodeError::UnknownEncoding {
             encoding: s.to_string(),
         })
@@ -126,6 +129,7 @@ where
 pub enum EncodeError {
     #[error("json encode: {0}")]
     Json(#[from] serde_json::Error),
+
     #[cfg(feature = "cbor")]
     #[error("cbor encode: {0}")]
     Cbor(#[from] ciborium::ser::Error<std::io::Error>),
@@ -135,6 +139,7 @@ pub enum EncodeError {
 pub enum DecodeError {
     #[error("unknown encoding: {encoding}")]
     UnknownEncoding { encoding: String },
+
     #[error("encoding mismatch: expected {expected:?}, actual {actual:?}")]
     EncodingMismatch {
         expected: Encoding,
@@ -142,6 +147,7 @@ pub enum DecodeError {
     },
     #[error("json decode: {0}")]
     Json(#[from] serde_json::Error),
+
     #[cfg(feature = "cbor")]
     #[error("cbor decode: {0}")]
     Cbor(#[from] ciborium::de::Error<std::io::Error>),
@@ -155,6 +161,7 @@ pub enum DecodeError {
 pub enum CodecError {
     #[error(transparent)]
     Encode(#[from] EncodeError),
+
     #[error(transparent)]
     Decode(#[from] DecodeError),
 }
