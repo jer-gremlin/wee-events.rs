@@ -462,13 +462,6 @@ impl<S, L, Handlers, EL, EH> ServiceBuilder<S, L, Handlers, EL, EH> {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = crate::Result<Ctx>> + Send + 'static,
     {
-        self.build_raw(factory)
-    }
-
-    /// Adapter escape hatch: produce a `BuiltService` without enforcing a
-    /// factory shape. The caller's adapter must provide the bridge impl.
-    #[doc(hidden)]
-    pub fn build_raw<Ctx, F>(self, factory: F) -> BuiltService<Ctx, S, L, F, Handlers, EL, EH> {
         BuiltService {
             factory,
             loader: self.loader,
