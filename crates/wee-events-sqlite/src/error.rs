@@ -65,8 +65,8 @@ mod tests {
         use wee_events::RetryExhausted;
 
         let diagnostics = RetryDiagnostics {
-            last_attempted_revision: Revision::new("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
-            observed_max_revision: Revision::new("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+            last_attempted_revision: Revision::try_from("01ARZ3NDEKTSV4RRFFQ69G5FAV").unwrap(),
+            observed_max_revision: Revision::try_from("01ARZ3NDEKTSV4RRFFQ69G5FAW").unwrap(),
             possible_clock_skew_ms: Some(17),
         };
 

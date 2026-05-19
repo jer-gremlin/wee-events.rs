@@ -42,7 +42,7 @@ pub use event::{ChangeSet, DomainEvent, EventData, EventMetadata, RecordedEvent}
 pub use handler_env::HandlerEnv;
 pub use id::{
     AggregateId, AggregateIdParseError, AggregateType, CommandName, CorrelationId, EventId,
-    EventType, Revision,
+    EventType, Revision, RevisionParseError,
 };
 pub use publisher::{HasPublisher, Publisher};
 pub use renderer::{EventPattern, EventPatternError, ReduceFn, RenderError, Renderer};
