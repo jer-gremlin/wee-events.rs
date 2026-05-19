@@ -24,10 +24,11 @@ pub struct RawEvent {
 /// load and publish take `AggregateId` as a parameter.
 ///
 /// Implementors provide the persistence mechanism (in-memory, SQLite, etc.)
-/// and choose their own error type via `type Error`. The error type must
-/// be convertible from `crate::Error` so that structural failures
-/// (revision conflicts, encoding mismatches, retry exhaustion) flow through
-/// unchanged.
+/// and choose their own error type via `type Error`. The error type must be
+/// convertible from `crate::Error` so that structural failures (revision
+/// conflicts, encoding mismatches, retry exhaustion) flow through unchanged;
+/// backend-specific failures should be wrapped through `Error::Custom(...)`
+/// rather than added to the trait bound.
 ///
 /// This trait is intended for static dispatch. Methods return `Send` futures so
 /// generated durable adapters can hold store references across async boundaries.
@@ -45,23 +46,17 @@ pub struct RawEvent {
 /// dedicated reentrant primitive — do not rely on the public surface of an
 /// implementation being reentrant by default.
 pub trait EventStore: Send + Sync {
-    type Error: From<crate::Error>
-        + From<serde_json::Error>
-        + crate::EventStoreErrorExt
-        + std::error::Error
-        + Send
-        + Sync
-        + 'static;
-
-    fn load(&self, id: &AggregateId)
-    -> impl Future<Output = Result<Aggregate, Self::Error>> + Send;
+    fn load(
+        &self,
+        id: &AggregateId,
+    ) -> impl Future<Output = Result<Aggregate, crate::Error>> + Send;
 
     fn publish(
         &self,
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> impl Future<Output = Result<ChangeSet, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<ChangeSet, crate::Error>> + Send;
 }
 
 /// Blanket impl so `Arc<Store>` can be passed wherever `impl EventStore`
@@ -78,12 +73,10 @@ impl<T> EventStore for Arc<T>
 where
     T: EventStore,
 {
-    type Error = T::Error;
-
     fn load(
         &self,
         id: &AggregateId,
-    ) -> impl Future<Output = Result<Aggregate, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Aggregate, crate::Error>> + Send {
         (**self).load(id)
     }
 
@@ -92,7 +85,7 @@ where
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> impl Future<Output = Result<ChangeSet, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<ChangeSet, crate::Error>> + Send {
         (**self).publish(aggregate_id, options, events)
     }
 }

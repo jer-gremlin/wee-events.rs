@@ -5,39 +5,10 @@ use parking_lot::{Mutex, RwLock};
 use ulid::Generator;
 
 use crate::aggregate::Aggregate;
+use crate::error::Error;
 use crate::event::{ChangeSet, EventMetadata, RecordedEvent};
 use crate::id::{AggregateId, AggregateType, EventId, Revision};
 use crate::store::{EventStore, PublishOptions, RawEvent};
-
-/// Errors produced by [`MemoryStore`].
-///
-/// The `WeeEvents` variant carries structural failures from `crate::Error`
-/// (revision conflicts, encoding mismatches, retry exhaustion), satisfying
-/// the `From<crate::Error>` bound required by the [`EventStore`] trait.
-#[derive(Debug, thiserror::Error)]
-pub enum MemoryStoreError {
-    #[error(transparent)]
-    WeeEvents(#[from] crate::Error),
-    #[error("ulid generation: {0}")]
-    Ulid(Box<dyn std::error::Error + Send + Sync>),
-    #[error("codec: {0}")]
-    Codec(#[from] crate::EncodeError),
-}
-
-impl crate::EventStoreErrorExt for MemoryStoreError {
-    fn as_wee_events(&self) -> Option<&crate::Error> {
-        match self {
-            MemoryStoreError::WeeEvents(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<serde_json::Error> for MemoryStoreError {
-    fn from(error: serde_json::Error) -> Self {
-        Self::Codec(crate::EncodeError::Json(error))
-    }
-}
 
 /// In-memory event store for testing. Thread-safe via `Mutex`.
 ///
@@ -72,17 +43,13 @@ impl MemoryStore {
     /// Mints `count` paired `(EventId, Revision)` ULIDs in a single
     /// acquisition of the generator lock. Generator lock is released before
     /// the caller touches the streams shard — no lock-in-lock ordering.
-    fn mint_event_ids(&self, count: usize) -> Result<Vec<(EventId, Revision)>, MemoryStoreError> {
+    fn mint_event_ids(&self, count: usize) -> Result<Vec<(EventId, Revision)>, Error> {
         let mut generator = self.backing.generator.lock();
         let mut out = Vec::with_capacity(count);
         let mut buf = [0u8; ulid::ULID_LEN];
         for _ in 0..count {
-            let event_id = generator
-                .generate()
-                .map_err(|e| MemoryStoreError::Ulid(Box::new(e)))?;
-            let revision = generator
-                .generate()
-                .map_err(|e| MemoryStoreError::Ulid(Box::new(e)))?;
+            let event_id = generator.generate().map_err(Error::custom)?;
+            let revision = generator.generate().map_err(Error::custom)?;
             let event_id = EventId::from(&*event_id.array_to_str(&mut buf));
             let revision = Revision::from(&*revision.array_to_str(&mut buf));
             out.push((event_id, revision));
@@ -118,7 +85,7 @@ impl MemoryStore {
         options: PublishOptions,
         events: Vec<RawEvent>,
         minted: Vec<(EventId, Revision)>,
-    ) -> Result<ChangeSet, MemoryStoreError> {
+    ) -> Result<ChangeSet, Error> {
         let metadata = EventMetadata {
             causation_id: options.causation_id,
             correlation_id: options.correlation_id,
@@ -157,12 +124,10 @@ impl MemoryStore {
             None => {
                 if let Some(expected) = &options.expected_revision {
                     if !expected.is_zero() {
-                        return Err(MemoryStoreError::WeeEvents(
-                            crate::Error::RevisionConflict {
-                                expected: expected.clone(),
-                                actual: Revision::zero(),
-                            },
-                        ));
+                        return Err(Error::RevisionConflict {
+                            expected: expected.clone(),
+                            actual: Revision::zero(),
+                        });
                     }
                 }
                 self.stream_for(aggregate_id)
@@ -180,12 +145,10 @@ impl MemoryStore {
             };
             if !matches {
                 let actual = actual_ref.cloned().unwrap_or_else(Revision::zero);
-                return Err(MemoryStoreError::WeeEvents(
-                    crate::Error::RevisionConflict {
-                        expected: expected.clone(),
-                        actual,
-                    },
-                ));
+                return Err(Error::RevisionConflict {
+                    expected: expected.clone(),
+                    actual,
+                });
             }
         }
 
@@ -265,9 +228,7 @@ impl MemoryStore {
 }
 
 impl EventStore for MemoryStore {
-    type Error = MemoryStoreError;
-
-    async fn load(&self, id: &AggregateId) -> Result<Aggregate, MemoryStoreError> {
+    async fn load(&self, id: &AggregateId) -> Result<Aggregate, Error> {
         Ok(self.load_sync(id))
     }
 
@@ -276,7 +237,7 @@ impl EventStore for MemoryStore {
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> Result<ChangeSet, MemoryStoreError> {
+    ) -> Result<ChangeSet, Error> {
         // Empty-events fast path: no IDs needed, single brief streams-lock acquisition.
         if events.is_empty() {
             return Ok(ChangeSet {

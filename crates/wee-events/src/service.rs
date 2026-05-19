@@ -1,6 +1,5 @@
 use crate::command::Command;
 use crate::entity::Entity;
-use crate::event::DeserializeJsonError;
 use crate::id::AggregateId;
 
 /// A structured rejection from the domain layer. Indicates a command was
@@ -88,29 +87,6 @@ where
                 }))
             }
             crate::RenderError::ApplyFailed { source, .. } => ServiceError::Codec(source.into()),
-        }
-    }
-}
-
-/// Lift a [`DeserializeJsonError`] into a [`ServiceError`]: encoding-mismatch
-/// is a structural store-contract failure (routed through `Store(E)` via the
-/// store error's `From<crate::Error>` impl), and a decode failure is a codec
-/// failure (routed through `Codec` as a `DecodeError::Json`).
-impl<E> From<DeserializeJsonError> for ServiceError<E>
-where
-    E: From<crate::Error> + std::error::Error + Send + Sync + 'static,
-{
-    fn from(err: DeserializeJsonError) -> Self {
-        match err {
-            DeserializeJsonError::EncodingMismatch { expected, actual } => {
-                ServiceError::Store(E::from(crate::Error::EncodingMismatch {
-                    expected: expected.as_str().to_string(),
-                    actual: actual.as_str().to_string(),
-                }))
-            }
-            DeserializeJsonError::Decode(e) => {
-                ServiceError::Codec(crate::CodecError::Decode(crate::DecodeError::Json(e)))
-            }
         }
     }
 }

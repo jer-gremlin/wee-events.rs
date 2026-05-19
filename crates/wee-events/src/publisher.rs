@@ -22,7 +22,7 @@ where
         &self,
         entity: &Entity<S>,
         events: Vec<E>,
-    ) -> Result<ChangeSet, ServiceError<Store::Error>>
+    ) -> Result<ChangeSet, ServiceError<crate::Error>>
     where
         E: DomainEvent,
     {

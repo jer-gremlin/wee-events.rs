@@ -13,7 +13,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::EventStoreErrorExt;
 use crate::event::EventData;
 use crate::id::{AggregateId, CorrelationId, EventType, Revision};
 use crate::store::{EventStore, PublishOptions, RawEvent};
@@ -229,8 +228,8 @@ pub async fn revision_conflict_on_initial_revision(store: &impl EventStore) {
 
     assert!(result.is_err());
     let err = result.unwrap_err();
-    match err.as_wee_events() {
-        Some(crate::Error::RevisionConflict { .. }) => {}
+    match &err {
+        crate::Error::RevisionConflict { .. } => {}
         _ => panic!("expected RevisionConflict, got: {err}"),
     }
 }
@@ -264,8 +263,8 @@ pub async fn revision_conflict_on_subsequent_revision(store: &impl EventStore) {
 
     assert!(result.is_err());
     let err = result.unwrap_err();
-    match err.as_wee_events() {
-        Some(crate::Error::RevisionConflict { .. }) => {}
+    match &err {
+        crate::Error::RevisionConflict { .. } => {}
         _ => panic!("expected RevisionConflict, got: {err}"),
     }
 }
@@ -347,8 +346,8 @@ pub async fn stale_revision_detected_and_retry_succeeds(store: &impl EventStore)
 
     assert!(result.is_err(), "stale revision should be rejected");
     let err = result.unwrap_err();
-    match err.as_wee_events() {
-        Some(crate::Error::RevisionConflict { .. }) => {}
+    match &err {
+        crate::Error::RevisionConflict { .. } => {}
         _ => panic!("expected RevisionConflict, got: {err}"),
     }
 
@@ -501,8 +500,8 @@ pub async fn stale_revision_conflicts_across_store_instances(
         .await
         .expect_err("stale revision should be rejected");
 
-    match error.as_wee_events() {
-        Some(crate::Error::RevisionConflict { .. }) => {}
+    match &error {
+        crate::Error::RevisionConflict { .. } => {}
         _ => panic!("expected RevisionConflict, got: {error}"),
     }
 }

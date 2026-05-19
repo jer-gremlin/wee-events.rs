@@ -650,9 +650,7 @@ impl<T> EventStoreTrait for TempStore<T>
 where
     T: EventStoreTrait,
 {
-    type Error = T::Error;
-
-    async fn load(&self, id: &AggregateId) -> Result<Aggregate, Self::Error> {
+    async fn load(&self, id: &AggregateId) -> Result<Aggregate, wee_events::Error> {
         self.store.load(id).await
     }
 
@@ -661,7 +659,7 @@ where
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> Result<ChangeSet, Self::Error> {
+    ) -> Result<ChangeSet, wee_events::Error> {
         self.store.publish(aggregate_id, options, events).await
     }
 }

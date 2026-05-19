@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::codec::Encoding;
+use crate::codec::{DecodeError, Encoding};
 use crate::id::{AggregateId, CorrelationId, EventId, EventType, Revision};
 
 /// Encoding-tagged payload. The store treats this as opaque bytes with an
@@ -15,44 +15,6 @@ use crate::id::{AggregateId, CorrelationId, EventId, EventType, Revision};
 pub struct EventData {
     pub encoding: Encoding,
     pub data: Vec<u8>,
-}
-
-/// Error returned by [`EventData::deserialize_json`].
-///
-/// The two variants distinguish a structural failure (the payload is not in
-/// the expected encoding) from a codec failure (the bytes are JSON but did not
-/// deserialize into the target type). Callers can preserve that distinction
-/// when mapping into a service-level error rather than collapsing both into
-/// a single stringly-typed message.
-#[derive(Debug, thiserror::Error)]
-pub enum DeserializeJsonError {
-    #[error("encoding mismatch: expected {expected:?}, actual {actual:?}")]
-    EncodingMismatch {
-        expected: Encoding,
-        actual: Encoding,
-    },
-    #[error(transparent)]
-    Decode(#[from] serde_json::Error),
-}
-
-impl DeserializeJsonError {
-    /// Project this error into any store error type. `EncodingMismatch`
-    /// becomes a structural [`crate::Error::EncodingMismatch`]; `Decode`
-    /// becomes a raw [`serde_json::Error`]. Useful for [`crate::Renderer`]
-    /// callers whose return type is the store's associated `Error`.
-    pub fn into_store_error<E>(self) -> E
-    where
-        E: From<crate::Error> + From<serde_json::Error>,
-    {
-        match self {
-            Self::EncodingMismatch { expected, actual } => crate::Error::EncodingMismatch {
-                expected: expected.as_str().to_string(),
-                actual: actual.as_str().to_string(),
-            }
-            .into(),
-            Self::Decode(e) => e.into(),
-        }
-    }
 }
 
 impl EventData {
@@ -76,29 +38,10 @@ impl EventData {
         matches!(self.encoding, Encoding::Json)
     }
 
-    /// Deserializes the payload as JSON into the target type.
-    ///
-    /// Returns `DeserializeJsonError::EncodingMismatch` if the payload is not
-    /// JSON-encoded, or `DeserializeJsonError::Decode` if JSON parsing fails.
-    pub fn deserialize_json<T: for<'de> Deserialize<'de>>(
-        &self,
-    ) -> Result<T, DeserializeJsonError> {
-        if !self.is_json() {
-            return Err(DeserializeJsonError::EncodingMismatch {
-                expected: Encoding::Json,
-                actual: self.encoding,
-            });
-        }
-        Encoding::Json.decode(self).map_err(|err| match err {
-            crate::DecodeError::EncodingMismatch { expected, actual } => {
-                DeserializeJsonError::EncodingMismatch { expected, actual }
-            }
-            crate::DecodeError::Json(e) => DeserializeJsonError::Decode(e),
-            other => DeserializeJsonError::Decode(serde_json::Error::io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                other,
-            ))),
-        })
+    /// Deserializes the payload as JSON into the target type. Returns
+    /// `DecodeError::EncodingMismatch` if the payload is not JSON-encoded.
+    pub fn deserialize_json<T: for<'de> Deserialize<'de>>(&self) -> Result<T, DecodeError> {
+        Encoding::Json.decode(self)
     }
 }
 
