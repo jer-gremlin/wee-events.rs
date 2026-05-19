@@ -87,11 +87,11 @@ impl SqldNamespacedPartitionStrategy for HashedStrategy {}
 /// then the key bytes. Length-prefixing the type prevents type/key boundary
 /// collisions: `("foo:", "bar")` and `("foo", ":bar")` must hash differently.
 fn hash_aggregate_id(aggregate_id: &AggregateId) -> u32 {
-    let mut hash = 0x811c9dc5_u32;
+    let mut hash = 0x811c_9dc5_u32;
     let agg_type = aggregate_id.aggregate_type().as_str().as_bytes();
     let agg_key = aggregate_id.aggregate_key().as_bytes();
 
-    let len_prefix = (agg_type.len() as u32).to_le_bytes();
+    let len_prefix = u32::try_from(agg_type.len()).unwrap_or(u32::MAX).to_le_bytes();
     for byte in len_prefix
         .iter()
         .copied()

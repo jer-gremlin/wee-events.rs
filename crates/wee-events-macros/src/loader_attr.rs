@@ -222,13 +222,13 @@ pub fn expand(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = syn::parse_macro_input!(args as LoaderArgs);
     let func = syn::parse_macro_input!(input as ItemFn);
 
-    match expand_inner(args, func) {
+    match expand_inner(&args, &func) {
         Ok(ts) => ts.into(),
         Err(e) => e.to_compile_error().into(),
     }
 }
 
-fn expand_inner(args: LoaderArgs, func: ItemFn) -> syn::Result<TokenStream2> {
+fn expand_inner(args: &LoaderArgs, func: &ItemFn) -> syn::Result<TokenStream2> {
     // Validate: function must have at least one generic type parameter
     if func.sig.generics.type_params().next().is_none() {
         return Err(Error::new_spanned(

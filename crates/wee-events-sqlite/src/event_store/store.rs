@@ -615,7 +615,7 @@ impl From<Error> for PublishAttemptError {
 }
 
 fn retry_delay(attempt: usize) -> Duration {
-    let exponent = attempt.min(5) as u32;
+    let exponent = u32::try_from(attempt.min(5)).expect("clamped to 5");
     let backoff_ms = (BASE_RETRY_DELAY_MS << exponent).min(MAX_RETRY_DELAY_MS);
     let jitter_ms = if backoff_ms == 0 {
         0
@@ -631,7 +631,7 @@ fn lazy_create_partition_ready_delay() -> Duration {
 }
 
 fn busy_retry_delay(attempt: usize) -> Duration {
-    let exponent = attempt.min(6) as u32;
+    let exponent = u32::try_from(attempt.min(6)).expect("clamped to 6");
     let backoff_ms = (BUSY_BASE_DELAY_MS << exponent).min(BUSY_MAX_DELAY_MS);
     let jitter_ms = next_jitter() % (backoff_ms + 1);
     Duration::from_millis(backoff_ms + jitter_ms)
@@ -645,28 +645,29 @@ fn next_jitter() -> u64 {
     static STATE: AtomicU64 = AtomicU64::new(0);
     let mut x = STATE.load(Ordering::Relaxed);
     if x == 0 {
-        let seed = SystemTime::now()
+        let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos() as u64
-            | 1;
+            .as_nanos();
+        // Truncation to low 64 bits is intentional: this is a PRNG seed,
+        // not a wall-clock timestamp.
+        #[allow(clippy::cast_possible_truncation)]
+        let seed = (nanos as u64) | 1;
         x = seed;
     }
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;
     STATE.store(x, Ordering::Relaxed);
-    x.wrapping_mul(0x2545F4914F6CDD1D)
+    x.wrapping_mul(0x2545_F491_4F6C_DD1D)
 }
 
 fn is_sqlite_busy(error: &Error) -> bool {
     match error {
-        Error::Libsql(libsql::Error::SqliteFailure(code, _)) => {
-            *code == SQLITE_BUSY || *code == SQLITE_LOCKED
-        }
-        Error::Libsql(libsql::Error::RemoteSqliteFailure(_, code, _)) => {
-            *code == SQLITE_BUSY || *code == SQLITE_LOCKED
-        }
+        Error::Libsql(
+            libsql::Error::SqliteFailure(code, _)
+            | libsql::Error::RemoteSqliteFailure(_, code, _),
+        ) => *code == SQLITE_BUSY || *code == SQLITE_LOCKED,
         _ => false,
     }
 }
@@ -681,9 +682,11 @@ fn is_lazy_create_partition_not_ready(error: &Error) -> bool {
         return false;
     };
     let message = match libsql_error {
+        libsql::Error::ConnectionFailed(s) => s.clone(),
+        // Different inner types implementing Display; can't be merged via `|`.
+        #[allow(clippy::match_same_arms)]
         libsql::Error::Hrana(e) => e.to_string(),
         libsql::Error::WriteDelegation(e) => e.to_string(),
-        libsql::Error::ConnectionFailed(s) => s.clone(),
         _ => return false,
     };
     is_lazy_create_partition_not_ready_message(&message)

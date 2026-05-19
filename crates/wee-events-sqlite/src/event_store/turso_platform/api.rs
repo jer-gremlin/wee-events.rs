@@ -298,8 +298,7 @@ impl TursoPlatformApi for TursoHttpClient {
             .map_err(|e| ApiError::Unexpected(format!("request failed: {e}")))?;
 
         match response.status().as_u16() {
-            200 => Ok(()),
-            404 => Ok(()), // already gone
+            200 | 404 => Ok(()),
             401 | 403 => {
                 let body = response.text().await.unwrap_or_default();
                 Err(ApiError::AuthFailure(body))

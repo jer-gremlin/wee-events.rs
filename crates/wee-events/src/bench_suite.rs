@@ -397,7 +397,6 @@ pub fn bench_write_spread<S: EventStore + 'static>(
             //                    events, then prepare N pre-cloned raw event
             //                    vecs for the timed spawn loop.
             // timed region     : `tokio::spawn` one publish per aggregate.
-            let store = store;
             let seed_template = &seed_template;
             let raw_template = &raw_template;
             b.to_async(rt).iter_custom(move |iters| async move {
@@ -452,7 +451,6 @@ pub fn bench_write_concentrated<S: EventStore + 'static>(
         group.bench_function(format!("{n}"), |b| {
             // Same `iter_custom` shape as `bench_write_spread`, except all
             // aggregates share the "concentrated" type.
-            let store = store;
             let seed_template = &seed_template;
             let raw_template = &raw_template;
             b.to_async(rt).iter_custom(move |iters| async move {
@@ -509,7 +507,6 @@ pub fn bench_write_contention<S: EventStore + 'static>(
             // timed region     : N writers spawn, all `.wait()` on a barrier,
             //                    then publish simultaneously. Real contention
             //                    on one aggregate.
-            let store = store;
             let seed_template = &seed_template;
             let raw_template = &raw_template;
             b.to_async(rt).iter_custom(move |iters| async move {
@@ -658,7 +655,6 @@ pub fn bench_mixed_read_write<S: EventStore + 'static>(
             //                    pre-cloned for the writers.
             // timed region     : spawn 2N tasks; readers `load`, writers
             //                    `publish`; drain.
-            let store = store;
             let seed_template = &seed_template;
             let raw_template = &raw_template;
             b.to_async(rt).iter_custom(move |iters| async move {
