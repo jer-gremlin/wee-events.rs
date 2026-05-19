@@ -68,9 +68,7 @@ pub(crate) async fn open_event_store_connection(
             let db = Builder::new_remote(url.clone(), auth_token.clone())
                 .build()
                 .await?;
-            let conn = db.connect()?;
-            prepare_remote_connection(&conn).await?;
-            conn
+            db.connect()?
         }
         DatabaseTarget::SqldNamespace {
             url,
@@ -80,9 +78,7 @@ pub(crate) async fn open_event_store_connection(
             let builder =
                 Builder::new_remote(url.clone(), auth_token.clone()).namespace(namespace.clone());
             let db = builder.build().await?;
-            let conn = db.connect()?;
-            prepare_remote_connection(&conn).await?;
-            conn
+            db.connect()?
         }
     };
 
@@ -121,10 +117,6 @@ async fn prepare_local_connection(conn: &Connection) -> Result<(), Error> {
 
     conn.busy_timeout(Duration::from_secs(30))?; //TODO: const
     conn.execute_batch("PRAGMA foreign_keys=ON;").await?;
-    Ok(())
-}
-
-async fn prepare_remote_connection(_conn: &Connection) -> Result<(), Error> {
     Ok(())
 }
 

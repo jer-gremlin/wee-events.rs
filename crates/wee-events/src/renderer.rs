@@ -133,12 +133,13 @@ impl<S: Default, E> Renderer<S, E> {
     ///
     /// Plain strings are exact matches. Use [`EventPattern::glob`] for
     /// wildcard matching.
+    #[must_use]
     pub fn with(mut self, pattern: impl Into<EventPattern>, reducer: ReduceFn<S, E>) -> Self {
         match pattern.into() {
             EventPattern::Exact(event_type) => {
                 self.reducers.insert(event_type, reducer);
             }
-            pattern => self.pattern_reducers.push((pattern, reducer)),
+            pattern @ EventPattern::Glob(_) => self.pattern_reducers.push((pattern, reducer)),
         }
         self
     }
@@ -149,7 +150,7 @@ impl<S: Default, E> Renderer<S, E> {
             EventPattern::Exact(event_type) => {
                 self.reducers.insert(event_type, reducer);
             }
-            pattern => self.pattern_reducers.push((pattern, reducer)),
+            pattern @ EventPattern::Glob(_) => self.pattern_reducers.push((pattern, reducer)),
         }
     }
 
@@ -157,12 +158,13 @@ impl<S: Default, E> Renderer<S, E> {
     ///
     /// Plain strings are exact matches. Use [`EventPattern::glob`] for
     /// wildcard matching.
+    #[must_use]
     pub fn ignore(mut self, pattern: impl Into<EventPattern>) -> Self {
         match pattern.into() {
             EventPattern::Exact(event_type) => {
                 self.ignored.insert(event_type);
             }
-            pattern => self.ignored_patterns.push(pattern),
+            pattern @ EventPattern::Glob(_) => self.ignored_patterns.push(pattern),
         }
         self
     }
@@ -173,7 +175,7 @@ impl<S: Default, E> Renderer<S, E> {
             EventPattern::Exact(event_type) => {
                 self.ignored.insert(event_type);
             }
-            pattern => self.ignored_patterns.push(pattern),
+            pattern @ EventPattern::Glob(_) => self.ignored_patterns.push(pattern),
         }
     }
 

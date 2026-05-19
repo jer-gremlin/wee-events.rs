@@ -39,3 +39,6 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 [[bench]]
 name = "sqlite_store"
 harness = false
+
+[lints]
+workspace = true

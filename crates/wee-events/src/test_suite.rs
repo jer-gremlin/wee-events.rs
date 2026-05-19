@@ -39,7 +39,7 @@ pub fn make_test_aggregate_id() -> AggregateId {
 pub fn make_test_event(index: usize) -> StoreValidationEvent {
     StoreValidationEvent {
         test_string_value: format!("test-value-{}-{}", index, ulid::Ulid::new()),
-        test_int_value: index as i64 * 17 + 42,
+        test_int_value: i64::try_from(index).unwrap_or(i64::MAX) * 17 + 42,
     }
 }
 
