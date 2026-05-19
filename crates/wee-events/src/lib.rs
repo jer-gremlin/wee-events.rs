@@ -37,10 +37,8 @@ pub use create::{
     ServiceCreateStoreBuilder, create,
 };
 pub use entity::Entity;
-pub use error::{Error, EventStoreErrorExt, RetryDiagnostics};
-pub use event::{
-    ChangeSet, DeserializeJsonError, DomainEvent, EventData, EventMetadata, RecordedEvent,
-};
+pub use error::{Error, RetryDiagnostics, RetryExhausted};
+pub use event::{ChangeSet, DomainEvent, EventData, EventMetadata, RecordedEvent};
 pub use handler_env::HandlerEnv;
 pub use id::{
     AggregateId, AggregateIdParseError, AggregateType, CommandName, CorrelationId, EventId,
@@ -63,7 +61,7 @@ pub use store::{EventStore, PublishOptions, RawEvent};
 pub use wee_events_macros::{Command, DomainEvent, capability, handler, loader, service};
 
 pub mod memory {
-    pub use crate::memory_store::{MemoryStore, MemoryStoreError};
+    pub use crate::memory_store::MemoryStore;
 }
 
 #[cfg(any(test, feature = "testing"))]

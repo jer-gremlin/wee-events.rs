@@ -27,7 +27,7 @@ pub enum CounterEvent {
 pub async fn load<R: EventStore>(
     store: &R,
     id: &AggregateId,
-) -> Result<Entity<Counter>, ServiceError<R::Error>> {
+) -> Result<Entity<Counter>, ServiceError<wee_events::Error>> {
     let aggregate = store.load(id).await.map_err(ServiceError::Store)?;
     let mut state = Counter::default();
     for event in aggregate.events() {
@@ -51,7 +51,7 @@ pub async fn increment<R: HasPublisher>(
     env: &R,
     entity: &Entity<Counter>,
     command: Increment,
-) -> Result<(), ServiceError<<R::Store as EventStore>::Error>> {
+) -> Result<(), ServiceError<wee_events::Error>> {
     env.publisher()
         .publish(
             entity,

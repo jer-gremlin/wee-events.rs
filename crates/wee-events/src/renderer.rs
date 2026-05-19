@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::aggregate::Aggregate;
+use crate::codec::DecodeError;
 use crate::entity::Entity;
-use crate::event::{DeserializeJsonError, EventData, RecordedEvent};
+use crate::event::{EventData, RecordedEvent};
 use crate::id::{AggregateId, EventId, EventType, Revision};
 
 /// A reducer function pointer. Receives mutable state, the event type, and the
 /// event data (encoding + bytes). Responsible for deserializing and applying.
-pub type ReduceFn<S, E = DeserializeJsonError> =
-    fn(&mut S, &EventType, &EventData) -> Result<(), E>;
+pub type ReduceFn<S, E = DecodeError> = fn(&mut S, &EventType, &EventData) -> Result<(), E>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventPattern {
@@ -92,18 +92,16 @@ impl std::fmt::Display for RenderEventContext {
     }
 }
 
-impl RenderError<DeserializeJsonError> {
-    /// Project this render error into any store error type.
-    pub fn into_store_error<E>(self) -> E
-    where
-        E: From<crate::Error> + From<serde_json::Error>,
-    {
-        match self {
-            Self::UnhandledEventType { context } => crate::Error::UnhandledEventType {
+impl<E> From<RenderError<E>> for crate::Error
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: RenderError<E>) -> Self {
+        match err {
+            RenderError::UnhandledEventType { context } => crate::Error::UnhandledEventType {
                 event_type: context.event_type.to_string(),
-            }
-            .into(),
-            Self::ApplyFailed { source, .. } => source.into_store_error(),
+            },
+            RenderError::ApplyFailed { source, .. } => crate::Error::custom(source),
         }
     }
 }
@@ -113,7 +111,7 @@ impl RenderError<DeserializeJsonError> {
 ///
 /// Entity rendering is strict: event types without a reducer fail rendering
 /// unless explicitly ignored.
-pub struct Renderer<S, E = DeserializeJsonError> {
+pub struct Renderer<S, E = DecodeError> {
     reducers: HashMap<EventType, ReduceFn<S, E>>,
     pattern_reducers: Vec<(EventPattern, ReduceFn<S, E>)>,
     ignored: HashSet<EventType>,

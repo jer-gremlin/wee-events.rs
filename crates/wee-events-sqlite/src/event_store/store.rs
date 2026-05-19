@@ -481,10 +481,10 @@ where
             }
         }
 
-        Err(Error::WeeEvents(wee_events::Error::RetryExhausted {
-            attempts: max_attempts,
-            diagnostics: last_conflict.expect("retry loop always records the last conflict"),
-        }))
+        Err(Error::WeeEvents(wee_events::Error::retry_exhausted(
+            max_attempts,
+            last_conflict.expect("retry loop always records the last conflict"),
+        )))
     }
 
     async fn publish_to_aggregate(
@@ -725,10 +725,8 @@ where
     S: PartitionStrategy,
     C: PartitionCatalog<S::Partition>,
 {
-    type Error = Error;
-
-    async fn load(&self, id: &AggregateId) -> Result<Aggregate, Self::Error> {
-        self.load_aggregate(id).await
+    async fn load(&self, id: &AggregateId) -> Result<Aggregate, wee_events::Error> {
+        self.load_aggregate(id).await.map_err(Into::into)
     }
 
     async fn publish(
@@ -736,9 +734,10 @@ where
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-    ) -> Result<ChangeSet, Self::Error> {
+    ) -> Result<ChangeSet, wee_events::Error> {
         self.publish_to_aggregate(aggregate_id, options, events)
             .await
+            .map_err(Into::into)
     }
 }
 
