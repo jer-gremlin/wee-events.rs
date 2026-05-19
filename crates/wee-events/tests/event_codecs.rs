@@ -103,7 +103,7 @@ fn renderer_can_decode_events_from_event_data_encoding() {
         vec![RecordedEvent {
             event_id: EventId::new("event-1"),
             event_type: EventType::new("counter:incremented"),
-            revision: Revision::new("event-1"),
+            revision: Revision::generate(),
             metadata: EventMetadata::default(),
             data,
         }],
@@ -127,7 +127,7 @@ fn renderer_errors_on_unhandled_event_type() {
         vec![RecordedEvent {
             event_id: EventId::new("event-1"),
             event_type: EventType::new("counter:unknown"),
-            revision: Revision::new("event-1"),
+            revision: Revision::generate(),
             metadata: EventMetadata::default(),
             data: EventData::json(&serde_json::json!({})).expect("json encode should succeed"),
         }],
@@ -154,7 +154,7 @@ fn renderer_can_explicitly_ignore_globbed_event_types() {
         vec![RecordedEvent {
             event_id: EventId::new("event-1"),
             event_type: EventType::new("counter:legacy-reset"),
-            revision: Revision::new("event-1"),
+            revision: Revision::generate(),
             metadata: EventMetadata::default(),
             data: EventData::json(&serde_json::json!({})).expect("json encode should succeed"),
         }],
@@ -187,7 +187,7 @@ fn renderer_can_reduce_globbed_event_types() {
         vec![RecordedEvent {
             event_id: EventId::new("event-1"),
             event_type: EventType::new("counter:legacy-reset"),
-            revision: Revision::new("event-1"),
+            revision: Revision::generate(),
             metadata: EventMetadata::default(),
             data: EventData::json(&serde_json::json!({})).expect("json encode should succeed"),
         }],

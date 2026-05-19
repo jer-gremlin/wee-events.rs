@@ -342,12 +342,11 @@ where
         Ok(ids)
     }
 
-    fn generate_ulid(&self) -> Result<String, Error> {
+    fn generate_ulid(&self) -> Result<Ulid, Error> {
         self.generator
             .lock()
             .map_err(|e| Error::Internal(e.to_string()))?
             .generate()
-            .map(|u| u.to_string())
             .map_err(|e| Error::Internal(e.to_string()))
     }
 
@@ -374,10 +373,12 @@ where
             let encoding = Encoding::from_encoding_str(&encoding)
                 .map_err(|e| Error::Internal(format!("event row has unknown encoding: {e}")))?;
 
+            let revision = Revision::try_from(revision)
+                .map_err(|e| Error::Internal(format!("event row has invalid revision: {e}")))?;
             events.push(RecordedEvent {
                 event_id: EventId::new(event_id),
                 event_type: wee_events::EventType::new(event_type),
-                revision: Revision::new(revision),
+                revision,
                 metadata: EventMetadata {
                     causation_id: causation_id.map(EventId::new),
                     correlation_id: correlation_id.map(CorrelationId::new),
@@ -538,8 +539,10 @@ where
 
         let mut recorded = Vec::with_capacity(events.len());
         for (index, raw) in events.iter().enumerate() {
-            let event_id = EventId::new(self.generate_ulid()?);
-            let revision = self.generate_ulid()?;
+            let event_id_ulid = self.generate_ulid()?;
+            let revision_ulid = self.generate_ulid()?;
+            let event_id = EventId::new(event_id_ulid.to_string());
+            let revision_str = revision_ulid.to_string();
             let changes = execute_publish_statement(
                 &tx,
                 PublishRow {
@@ -549,15 +552,17 @@ where
                     raw,
                     metadata: &metadata,
                     event_id: &event_id,
-                    revision: &revision,
+                    revision: &revision_str,
                 },
             )
             .await?;
 
             if changes == 0 {
-                let attempted_revision = Revision::new(revision.clone());
+                let attempted_revision = Revision::from_ulid(revision_ulid);
                 let actual = match Self::current_revision(&tx, aggregate_id).await? {
-                    Some(value) => Revision::new(value),
+                    Some(value) => Revision::try_from(value).map_err(|e| {
+                        Error::Internal(format!("stored revision is invalid: {e}"))
+                    })?,
                     None => Revision::zero(),
                 };
                 let expected = options
@@ -575,7 +580,7 @@ where
             recorded.push(std::sync::Arc::new(RecordedEvent {
                 event_id,
                 event_type: raw.event_type.clone(),
-                revision: Revision::new(revision),
+                revision: Revision::from_ulid(revision_ulid),
                 metadata: metadata.clone(),
                 data: raw.data.clone(),
             }));
@@ -882,17 +887,17 @@ mod tests {
 
     #[test]
     fn possible_clock_skew_reports_positive_timestamp_gap() {
-        let attempted = Revision::new(Ulid::from_parts(1_000, 7).to_string());
-        let actual = Revision::new(Ulid::from_parts(1_017, 3).to_string());
+        let attempted = Revision::from_ulid(Ulid::from_parts(1_000, 7));
+        let actual = Revision::from_ulid(Ulid::from_parts(1_017, 3));
 
         assert_eq!(possible_clock_skew_ms(&attempted, &actual), Some(17));
     }
 
     #[test]
     fn possible_clock_skew_ignores_non_positive_gaps() {
-        let attempted = Revision::new(Ulid::from_parts(1_000, 7).to_string());
-        let same_ms = Revision::new(Ulid::from_parts(1_000, 99).to_string());
-        let earlier = Revision::new(Ulid::from_parts(999, 3).to_string());
+        let attempted = Revision::from_ulid(Ulid::from_parts(1_000, 7));
+        let same_ms = Revision::from_ulid(Ulid::from_parts(1_000, 99));
+        let earlier = Revision::from_ulid(Ulid::from_parts(999, 3));
 
         assert_eq!(possible_clock_skew_ms(&attempted, &same_ms), None);
         assert_eq!(possible_clock_skew_ms(&attempted, &earlier), None);

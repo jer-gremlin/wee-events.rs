@@ -52,7 +52,7 @@ impl MemoryStore {
             let event_id = generator.generate().map_err(Error::custom)?;
             let revision = generator.generate().map_err(Error::custom)?;
             let event_id = EventId::from(&*event_id.array_to_str(&mut buf));
-            let revision = Revision::from(&*revision.array_to_str(&mut buf));
+            let revision = Revision::from_ulid(revision);
             out.push((event_id, revision));
         }
         Ok(out)
