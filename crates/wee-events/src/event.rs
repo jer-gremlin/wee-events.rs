@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use serde::{Deserialize, Serialize};
 
 use crate::codec::Encoding;
@@ -8,18 +6,14 @@ use crate::id::{AggregateId, CorrelationId, EventId, EventType, Revision};
 /// Encoding-tagged payload. The store treats this as opaque bytes with an
 /// encoding discriminator — it never interprets the content.
 ///
-/// `encoding` is `Cow<'static, str>` — common values are `&'static str`
-/// constants (`"application/json"`, `"application/cbor"`) which avoid any
-/// allocation per event. Dynamic values from store row data become `Cow::Owned`.
-///
-/// Mirrors Go's `Data { Encoding, Data }` to support multiple encodings
-/// (JSON, protobuf, CBOR, encrypted payloads). Stores decompose this into
-/// separate columns/fields; full-struct JSON serialization (matching Go's
-/// wire format) is deferred to shared stores (NATS, DynamoDB) where interop
-/// matters.
+/// `encoding` is the typed [`Encoding`] enum — the type system forbids
+/// constructing an `EventData` with an unknown encoding. Stores reading from
+/// foreign data sources (sqlite TEXT columns, NATS messages) must convert
+/// the wire string via [`Encoding::from_encoding_str`] and propagate the
+/// `UnknownEncoding` error at row-read time.
 #[derive(Debug, Clone)]
 pub struct EventData {
-    pub encoding: Cow<'static, str>,
+    pub encoding: Encoding,
     pub data: Vec<u8>,
 }
 
@@ -32,8 +26,11 @@ pub struct EventData {
 /// a single stringly-typed message.
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeJsonError {
-    #[error("encoding mismatch: expected {expected}, actual {actual}")]
-    EncodingMismatch { expected: String, actual: String },
+    #[error("encoding mismatch: expected {expected:?}, actual {actual:?}")]
+    EncodingMismatch {
+        expected: Encoding,
+        actual: Encoding,
+    },
     #[error(transparent)]
     Decode(#[from] serde_json::Error),
 }
@@ -48,42 +45,35 @@ impl DeserializeJsonError {
         E: From<crate::Error> + From<serde_json::Error>,
     {
         match self {
-            Self::EncodingMismatch { expected, actual } => {
-                crate::Error::EncodingMismatch { expected, actual }.into()
+            Self::EncodingMismatch { expected, actual } => crate::Error::EncodingMismatch {
+                expected: expected.as_str().to_string(),
+                actual: actual.as_str().to_string(),
             }
+            .into(),
             Self::Decode(e) => e.into(),
         }
     }
 }
 
 impl EventData {
-    /// The encoding identifier for JSON payloads.
-    pub const JSON_ENCODING: &'static str = "application/json";
-
     /// Creates an `EventData` from a JSON-serializable value.
     #[inline]
     pub fn json<T: Serialize>(value: &T) -> Result<Self, crate::EncodeError> {
         Ok(Self {
-            encoding: Cow::Borrowed(crate::codec::json::ENCODING),
+            encoding: Encoding::Json,
             data: serde_json::to_vec(value)?,
         })
     }
 
     /// Creates an `EventData` from raw bytes with a given encoding.
-    ///
-    /// Accepts `&'static str` (no alloc, becomes `Cow::Borrowed`) or
-    /// `String` (becomes `Cow::Owned`). Stores that read encoding from
-    /// row data pass `Cow::Owned(s)` directly.
-    pub fn raw(encoding: impl Into<Cow<'static, str>>, data: Vec<u8>) -> Self {
-        Self {
-            encoding: encoding.into(),
-            data,
-        }
+    pub fn raw(encoding: Encoding, data: Vec<u8>) -> Self {
+        Self { encoding, data }
     }
 
     /// Returns true if this payload is JSON-encoded.
+    #[inline]
     pub fn is_json(&self) -> bool {
-        self.encoding == Self::JSON_ENCODING
+        matches!(self.encoding, Encoding::Json)
     }
 
     /// Deserializes the payload as JSON into the target type.
@@ -95,8 +85,8 @@ impl EventData {
     ) -> Result<T, DeserializeJsonError> {
         if !self.is_json() {
             return Err(DeserializeJsonError::EncodingMismatch {
-                expected: Self::JSON_ENCODING.to_string(),
-                actual: self.encoding.to_string(),
+                expected: Encoding::Json,
+                actual: self.encoding,
             });
         }
         Encoding::Json.decode(self).map_err(|err| match err {

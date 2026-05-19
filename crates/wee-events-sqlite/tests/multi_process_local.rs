@@ -1,10 +1,10 @@
-use wee_events::{EventData, EventStore as _, PublishOptions, RawEvent};
+use wee_events::{Encoding, EventData, EventStore as _, PublishOptions, RawEvent};
 use wee_events_sqlite::{GlobalStrategy, SqliteEventStore};
 
 fn raw_event(event_type: &str) -> RawEvent {
     RawEvent {
         event_type: event_type.into(),
-        data: EventData::raw("json", b"{}".to_vec()),
+        data: EventData::raw(Encoding::Json, b"{}".to_vec()),
     }
 }
 

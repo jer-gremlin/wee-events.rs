@@ -19,7 +19,7 @@ fn json_encoder_and_decoder_round_trip_event_data() {
         .serialize(&Payload { amount: 7 })
         .expect("json encode should succeed");
 
-    assert_eq!(data.encoding, json::ENCODING);
+    assert_eq!(data.encoding, Encoding::Json);
 
     let decoded: Payload = json::Decoder
         .deserialize(&data)
@@ -34,8 +34,8 @@ fn cbor_encoder_and_decoder_round_trip_event_data() {
         .serialize(&Payload { amount: 9 })
         .expect("cbor encode should succeed");
 
-    assert_eq!(data.encoding, cbor::ENCODING);
-    assert_ne!(data.encoding, json::ENCODING);
+    assert_eq!(data.encoding, Encoding::Cbor);
+    assert_ne!(data.encoding, Encoding::Json);
 
     let decoded: Payload = cbor::Decoder
         .deserialize(&data)
@@ -50,9 +50,8 @@ fn encoding_dispatch_selects_decoder_by_event_data_encoding() {
         .serialize(&Payload { amount: 11 })
         .expect("cbor encode should succeed");
 
-    let encoding = Encoding::from_encoding_str(&data.encoding)
-        .expect("encoding string should resolve to a supported variant");
-    let decoded: Payload = encoding
+    let decoded: Payload = data
+        .encoding
         .decode(&data)
         .expect("dispatch should find cbor decoder");
 
@@ -61,10 +60,8 @@ fn encoding_dispatch_selects_decoder_by_event_data_encoding() {
 
 #[test]
 fn encoding_dispatch_reports_unknown_encoding() {
-    let data = EventData::raw("application/x-custom", vec![1, 2, 3]);
-
-    let error =
-        Encoding::from_encoding_str(&data.encoding).expect_err("unknown encoding should fail");
+    let error = Encoding::from_encoding_str("application/x-custom")
+        .expect_err("unknown encoding should fail");
 
     assert!(matches!(
         error,
@@ -93,8 +90,7 @@ fn renderer_can_decode_events_from_event_data_encoding() {
         _event_type: &EventType,
         data: &EventData,
     ) -> Result<(), DecodeError> {
-        let encoding = Encoding::from_encoding_str(&data.encoding)?;
-        let payload: Payload = encoding.decode(data)?;
+        let payload: Payload = data.encoding.decode(data)?;
         state.amount += payload.amount;
         Ok(())
     }

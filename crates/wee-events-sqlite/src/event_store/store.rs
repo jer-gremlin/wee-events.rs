@@ -371,6 +371,8 @@ where
             let correlation_id: Option<String> = row.get(4)?;
             let encoding: String = row.get(5)?;
             let data: Vec<u8> = row.get(6)?;
+            let encoding = Encoding::from_encoding_str(&encoding)
+                .map_err(|e| Error::Internal(format!("event row has unknown encoding: {e}")))?;
 
             events.push(RecordedEvent {
                 event_id: EventId::new(event_id),
@@ -380,7 +382,7 @@ where
                     causation_id: causation_id.map(EventId::new),
                     correlation_id: correlation_id.map(CorrelationId::new),
                 },
-                data: EventData::raw(std::borrow::Cow::Owned(encoding), data),
+                data: EventData::raw(encoding, data),
             });
         }
 
@@ -809,7 +811,7 @@ async fn execute_publish_statement(
                     row.revision,
                     causation,
                     correlation,
-                    &*row.raw.data.encoding,
+                    row.raw.data.encoding.as_str(),
                     row.raw.data.data.clone(),
                 ],
             )
@@ -826,7 +828,7 @@ async fn execute_publish_statement(
                     row.revision,
                     causation,
                     correlation,
-                    &*row.raw.data.encoding,
+                    row.raw.data.encoding.as_str(),
                     row.raw.data.data.clone(),
                     expected.as_str(),
                 ],
@@ -844,7 +846,7 @@ async fn execute_publish_statement(
                     row.revision,
                     causation,
                     correlation,
-                    &*row.raw.data.encoding,
+                    row.raw.data.encoding.as_str(),
                     row.raw.data.data.clone(),
                 ],
             )

@@ -243,7 +243,7 @@ impl RenderEventContext {
             event_id: event.event_id.clone(),
             event_type: event.event_type.clone(),
             revision: event.revision.clone(),
-            encoding: event.data.encoding.to_string(),
+            encoding: event.data.encoding.as_str().to_string(),
         }
     }
 }

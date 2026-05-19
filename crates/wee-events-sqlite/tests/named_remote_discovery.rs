@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use wee_events::{AggregateId, EventData, EventStore as _, PublishOptions, RawEvent};
+use wee_events::{AggregateId, Encoding, EventData, EventStore as _, PublishOptions, RawEvent};
 use wee_events_sqlite::{
     DatabaseTarget, Error, NamedTargetProvisioner, PartitionByStrategy, PartitionName,
     SqldNamespacedProvisioner, SqliteEventStore, TypeStrategy,
@@ -147,7 +147,7 @@ async fn enumerate_after_restart_uses_logical_partition_name_not_backend_name() 
             PublishOptions::default(),
             vec![RawEvent {
                 event_type: "invoice-created".into(),
-                data: EventData::raw("json", b"{}".to_vec()),
+                data: EventData::raw(Encoding::Json, b"{}".to_vec()),
             }],
         )
         .await
@@ -187,7 +187,7 @@ async fn rejects_distinct_logical_partitions_that_alias_to_the_same_target() {
             PublishOptions::default(),
             vec![RawEvent {
                 event_type: "created".into(),
-                data: EventData::raw("json", b"{}".to_vec()),
+                data: EventData::raw(Encoding::Json, b"{}".to_vec()),
             }],
         )
         .await
@@ -199,7 +199,7 @@ async fn rejects_distinct_logical_partitions_that_alias_to_the_same_target() {
             PublishOptions::default(),
             vec![RawEvent {
                 event_type: "created".into(),
-                data: EventData::raw("json", b"{}".to_vec()),
+                data: EventData::raw(Encoding::Json, b"{}".to_vec()),
             }],
         )
         .await

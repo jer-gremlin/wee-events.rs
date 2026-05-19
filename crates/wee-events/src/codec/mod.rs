@@ -135,8 +135,11 @@ pub enum EncodeError {
 pub enum DecodeError {
     #[error("unknown encoding: {encoding}")]
     UnknownEncoding { encoding: String },
-    #[error("encoding mismatch: expected {expected}, actual {actual}")]
-    EncodingMismatch { expected: String, actual: String },
+    #[error("encoding mismatch: expected {expected:?}, actual {actual:?}")]
+    EncodingMismatch {
+        expected: Encoding,
+        actual: Encoding,
+    },
     #[error("json decode: {0}")]
     Json(#[from] serde_json::Error),
     #[cfg(feature = "cbor")]

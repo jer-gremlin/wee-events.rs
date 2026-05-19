@@ -368,10 +368,7 @@ async fn publisher_uses_store_event_encoder() {
         .await
         .expect("publish should succeed");
 
-    assert_eq!(
-        changes.events[0].data.encoding,
-        wee_events::encoding::json::ENCODING
-    );
+    assert_eq!(changes.events[0].data.encoding, wee_events::Encoding::Json);
 }
 
 #[tokio::test]
