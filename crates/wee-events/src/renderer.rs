@@ -119,6 +119,7 @@ pub struct Renderer<S, E = DecodeError> {
 }
 
 impl<S: Default, E> Renderer<S, E> {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             reducers: HashMap::new(),

@@ -16,10 +16,12 @@ pub struct HashedStrategy {
 }
 
 impl HashedStrategy {
+    #[must_use]
     pub fn new(buckets: NonZeroU32) -> Self {
         Self { buckets }
     }
 
+    #[must_use]
     pub fn buckets(&self) -> NonZeroU32 {
         self.buckets
     }

@@ -18,7 +18,7 @@ impl fmt::Display for RetryDiagnostics {
             self.last_attempted_revision, self.observed_max_revision
         )?;
         if let Some(skew_ms) = self.possible_clock_skew_ms {
-            write!(f, ", possible clock skew {} ms", skew_ms)?;
+            write!(f, ", possible clock skew {skew_ms} ms")?;
         }
         Ok(())
     }
@@ -73,6 +73,7 @@ impl Error {
     /// Convenience constructor: wraps a [`RetryExhausted`] in
     /// [`Error::Custom`]. Recover the typed value via
     /// `error.downcast_ref::<RetryExhausted>()`.
+    #[must_use]
     pub fn retry_exhausted(attempts: usize, diagnostics: RetryDiagnostics) -> Self {
         Error::custom(RetryExhausted {
             attempts,
@@ -83,6 +84,7 @@ impl Error {
     /// Returns the inner boxed error of [`Error::Custom`] as a concrete
     /// `&T`, if it matches. Returns `None` for structural variants and
     /// for `Custom` payloads of a different type.
+    #[must_use]
     pub fn downcast_ref<T: std::error::Error + 'static>(&self) -> Option<&T> {
         match self {
             Error::Custom(boxed) => boxed.downcast_ref::<T>(),

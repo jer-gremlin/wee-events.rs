@@ -297,10 +297,10 @@ fn expand_inner(args: HandlerArgs, func: ItemFn) -> syn::Result<TokenStream2> {
     let (impl_generics, _, where_clause) = generics.split_for_impl();
 
     // Spec struct name: {fn_name}_Spec
-    let spec_name = syn::Ident::new(&format!("{}_Spec", fn_name), fn_name.span());
+    let spec_name = syn::Ident::new(&format!("{fn_name}_Spec"), fn_name.span());
 
     // Composite requires trait name: __{fn_name}_Requires
-    let requires_trait_name = syn::Ident::new(&format!("__{}_Requires", fn_name), fn_name.span());
+    let requires_trait_name = syn::Ident::new(&format!("__{fn_name}_Requires"), fn_name.span());
 
     // Build the supertraits for the composite requires trait
     let requires_supertraits: TokenStream2 = if requires.is_empty() {

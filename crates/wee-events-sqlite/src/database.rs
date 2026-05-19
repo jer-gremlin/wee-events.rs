@@ -119,7 +119,7 @@ async fn prepare_local_connection(conn: &Connection) -> Result<(), Error> {
         }
     }
 
-    conn.busy_timeout(Duration::from_millis(30_000))?; //TODO: const
+    conn.busy_timeout(Duration::from_secs(30))?; //TODO: const
     conn.execute_batch("PRAGMA foreign_keys=ON;").await?;
     Ok(())
 }

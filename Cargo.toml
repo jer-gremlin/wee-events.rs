@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/wee-events-macros",
-    "crates/wee-events",
-    "crates/wee-events-sqlite",
-    "crates/wee-events-restate",
+  "crates/wee-events-macros",
+  "crates/wee-events",
+  "crates/wee-events-sqlite",
+  "crates/wee-events-restate",
 ]
 exclude = ["examples/coroutine-door"]
 
