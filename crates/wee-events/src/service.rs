@@ -92,8 +92,10 @@ where
 }
 
 /// Lift a [`crate::Error`] into a [`ServiceError`] via the inner store error's
-/// `From<crate::Error>` impl. This satisfies the `EH: From<crate::Error>` bound
-/// on `BuiltService` so handlers can use `ServiceError<E>` as their error type.
+/// `From<crate::Error>` impl. Used when `ServiceError<E>` plays the role of
+/// `EL` in `BuiltService` — `EL: From<crate::Error>` is the canonical gateway
+/// from infrastructure failures (factory, loader, store) into the service
+/// error world.
 impl<E> From<crate::Error> for ServiceError<E>
 where
     E: From<crate::Error> + std::error::Error + Send + Sync + 'static,
