@@ -536,9 +536,7 @@ async fn open_sqld_default_store_with_retry(
         match SqliteEventStore::open_sqld_default(provisioner.clone(), strategy).await {
             Ok(store) => return store,
             Err(error) => {
-                if Instant::now() >= deadline {
-                    panic!("sqld default did not become ready in time: {error}");
-                }
+                assert!(Instant::now() < deadline, "sqld default did not become ready in time: {error}");
                 sleep(Duration::from_millis(250)).await;
             }
         }
@@ -558,9 +556,7 @@ where
         match SqliteEventStore::open_sqld_namespaced(provisioner.clone(), strategy.clone()).await {
             Ok(store) => return store,
             Err(error) => {
-                if Instant::now() >= deadline {
-                    panic!("sqld did not become ready in time: {error}");
-                }
+                assert!(Instant::now() < deadline, "sqld did not become ready in time: {error}");
                 sleep(Duration::from_millis(250)).await;
             }
         }
@@ -579,9 +575,7 @@ where
         match store.load(&probe).await {
             Ok(_) => return,
             Err(error) => {
-                if Instant::now() >= deadline {
-                    panic!("remote sqld did not become ready in time: {error}");
-                }
+                assert!(Instant::now() < deadline, "remote sqld did not become ready in time: {error}");
                 sleep(Duration::from_millis(250)).await;
             }
         }
@@ -838,7 +832,7 @@ impl NamedTargetProvisioner for TestSqldNamespaceProvisioner {
         self.created_namespaces
             .lock()
             .unwrap()
-            .insert(namespace.to_string());
+            .insert(namespace.clone());
         if let PartitionName::Named(name) = name {
             self.known_names.lock().unwrap().insert(name.to_string());
         }

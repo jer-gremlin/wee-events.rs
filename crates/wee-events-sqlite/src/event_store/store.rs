@@ -560,9 +560,8 @@ where
             if changes == 0 {
                 let attempted_revision = Revision::from_ulid(revision_ulid);
                 let actual = match Self::current_revision(&tx, aggregate_id).await? {
-                    Some(value) => Revision::try_from(value).map_err(|e| {
-                        Error::Internal(format!("stored revision is invalid: {e}"))
-                    })?,
+                    Some(value) => Revision::try_from(value)
+                        .map_err(|e| Error::Internal(format!("stored revision is invalid: {e}")))?,
                     None => Revision::zero(),
                 };
                 let expected = options
@@ -670,8 +669,7 @@ fn next_jitter() -> u64 {
 fn is_sqlite_busy(error: &Error) -> bool {
     match error {
         Error::Libsql(
-            libsql::Error::SqliteFailure(code, _)
-            | libsql::Error::RemoteSqliteFailure(_, code, _),
+            libsql::Error::SqliteFailure(code, _) | libsql::Error::RemoteSqliteFailure(_, code, _),
         ) => *code == SQLITE_BUSY || *code == SQLITE_LOCKED,
         _ => false,
     }
@@ -803,8 +801,16 @@ async fn execute_publish_statement(
     tx: &libsql::Transaction,
     row: PublishRow<'_>,
 ) -> Result<u64, Error> {
-    let causation = row.metadata.causation_id.as_ref().map(wee_events::EventId::as_str);
-    let correlation = row.metadata.correlation_id.as_ref().map(wee_events::CorrelationId::as_str);
+    let causation = row
+        .metadata
+        .causation_id
+        .as_ref()
+        .map(wee_events::EventId::as_str);
+    let correlation = row
+        .metadata
+        .correlation_id
+        .as_ref()
+        .map(wee_events::CorrelationId::as_str);
 
     match (row.index, &row.options.expected_revision) {
         (0, Some(expected)) if expected.is_zero() => tx

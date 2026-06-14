@@ -258,6 +258,8 @@ impl<S: Default, E> Default for Renderer<S, E> {
 
 #[cfg(test)]
 mod precedence_tests {
+    // reducers match `Renderer::with` signature; the wrap is part of the contract
+    #![allow(clippy::unnecessary_wraps)]
     use super::{Aggregate, EventPattern, Renderer};
     use crate::codec::{DecodeError, Encoding};
     use crate::event::RecordedEvent;
@@ -294,7 +296,7 @@ mod precedence_tests {
                 event_id: EventId::new("event-1"),
                 event_type: EventType::new(event_type),
                 revision: Revision::generate(),
-                metadata: Default::default(),
+                metadata: crate::event::EventMetadata::default(),
                 data: Encoding::Json.encode(&serde_json::json!({})).unwrap(),
             }],
         )
@@ -305,7 +307,9 @@ mod precedence_tests {
         let renderer = Renderer::<State>::new()
             .with("counter:legacy", legacy_reducer)
             .with(EventPattern::glob("counter:*").unwrap(), glob_reducer);
-        let entity = renderer.render(aggregate_with_event("counter:legacy")).unwrap();
+        let entity = renderer
+            .render(aggregate_with_event("counter:legacy"))
+            .unwrap();
         assert_eq!(entity.state.legacy_hits, 1);
         assert_eq!(entity.state.glob_hits, 0);
     }
@@ -315,7 +319,9 @@ mod precedence_tests {
         let renderer = Renderer::<State>::new()
             .ignore(EventPattern::glob("counter:legacy-*").unwrap())
             .with(EventPattern::glob("counter:*").unwrap(), glob_reducer);
-        let entity = renderer.render(aggregate_with_event("counter:legacy-reset")).unwrap();
+        let entity = renderer
+            .render(aggregate_with_event("counter:legacy-reset"))
+            .unwrap();
         assert_eq!(entity.state.glob_hits, 0, "earlier ignore should skip");
     }
 
@@ -324,13 +330,19 @@ mod precedence_tests {
         let renderer = Renderer::<State>::new()
             .with("counter:legacy", legacy_reducer)
             .ignore(EventPattern::glob("counter:legacy*").unwrap());
-        let entity = renderer.render(aggregate_with_event("counter:legacy")).unwrap();
+        let entity = renderer
+            .render(aggregate_with_event("counter:legacy"))
+            .unwrap();
         assert_eq!(entity.state.legacy_hits, 1, "earlier reducer should fire");
     }
 
     #[test]
     fn no_matching_rule_fails() {
         let renderer = Renderer::<State>::new().with("counter:other", legacy_reducer);
-        assert!(renderer.render(aggregate_with_event("counter:unhandled")).is_err());
+        assert!(
+            renderer
+                .render(aggregate_with_event("counter:unhandled"))
+                .is_err()
+        );
     }
 }

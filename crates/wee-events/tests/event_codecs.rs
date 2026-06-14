@@ -173,6 +173,7 @@ fn renderer_can_reduce_globbed_event_types() {
         count: u32,
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn reduce(
         state: &mut State,
         _event_type: &EventType,

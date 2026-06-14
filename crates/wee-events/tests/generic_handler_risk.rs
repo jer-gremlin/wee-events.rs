@@ -1,4 +1,4 @@
-//! Compilation risk verification: generic-R handlers with ServiceBuilder.
+//! Compilation risk verification: generic-R handlers with `ServiceBuilder`.
 //!
 //! Verifies that `ServiceBuilder::with_handler::<C, _>(generic_fn::<R>)` compiles
 //! when called from inside a function that is itself generic over `R: SomeTrait`.

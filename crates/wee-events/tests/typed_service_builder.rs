@@ -19,7 +19,7 @@ struct Counter {
     value: i64,
 }
 
-/// Commands are plain structs with Serialize for the TypedService contract.
+/// Commands are plain structs with Serialize for the `TypedService` contract.
 #[derive(serde::Serialize)]
 struct Increment {
     amount: i64,
@@ -58,7 +58,7 @@ impl TestContext {
 // Shared error types
 // ---------------------------------------------------------------------------
 
-/// Loader error: plain wee_events structural errors.
+/// Loader error: plain `wee_events` structural errors.
 type LoaderErr = wee_events::Error;
 
 /// Handler error: richer service error that can carry domain rejections.

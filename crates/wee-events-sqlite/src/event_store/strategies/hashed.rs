@@ -91,7 +91,9 @@ fn hash_aggregate_id(aggregate_id: &AggregateId) -> u32 {
     let agg_type = aggregate_id.aggregate_type().as_str().as_bytes();
     let agg_key = aggregate_id.aggregate_key().as_bytes();
 
-    let len_prefix = u32::try_from(agg_type.len()).unwrap_or(u32::MAX).to_le_bytes();
+    let len_prefix = u32::try_from(agg_type.len())
+        .unwrap_or(u32::MAX)
+        .to_le_bytes();
     for byte in len_prefix
         .iter()
         .copied()

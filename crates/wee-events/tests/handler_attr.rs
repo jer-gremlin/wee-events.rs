@@ -1,6 +1,8 @@
 //! Tests that #[handler] and #[loader] emit the expected companion items.
 
 #![allow(dead_code)]
+// handler/loader bodies are async by macro contract; they need not await
+#![allow(clippy::unused_async)]
 
 use wee_events::{AggregateId, Command, Entity, HandlerSpec, LoaderSpec, Revision};
 
@@ -88,7 +90,8 @@ fn handler_requires_trait_generated() {
 fn loader_requires_trait_generated() {
     struct TestCtx;
     impl HasStore for TestCtx {
-        fn store_name(&self) -> &str {
+        #[allow(clippy::unnecessary_literal_bound)]
+        fn store_name(&self) -> &'static str {
             "test"
         }
     }

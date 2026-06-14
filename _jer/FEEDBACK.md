@@ -7,247 +7,247 @@
 ### Renderer
 
 - [ ] **[ARCH]** `src/renderer.rs:10-11` — `ReduceFn<S, E> = fn(&mut S, ...)` is a function pointer. Forbids closures and stateful reducers.
-	> SuGestion: `Box<dyn Fn(...) -> Result<...> + Send + Sync>` — one indirection, unblocks captures.
+  > SuGestion: `Box<dyn Fn(...) -> Result<...> + Send + Sync>` — one indirection, unblocks captures.
 - [ ] **[ARCH]** `src/renderer.rs:245-274` — Hand-rolled `*`-glob matcher with no visible tests.
-	> SuGestion: depend on `globset`, or admit it's prefix-match and use `str::starts_with`.
+  > SuGestion: depend on `globset`, or admit it's prefix-match and use `str::starts_with`.
 - [ ] **[FOOTGUN]** `src/renderer.rs:117-120` — No way to inspect a `Renderer` after construction. Write-only.
-	> SuGestion: add `fn covers(&self, event_type: &EventType) -> bool` so coverage can be asserted from tests.
+  > SuGestion: add `fn covers(&self, event_type: &EventType) -> bool` so coverage can be asserted from tests.
 - [ ] **[FOOTGUN]** `examples/restate-counter/src/state.rs:14-19` — `Renderer` wired by hand against `CounterEvent::INCREMENTED` etc. Add a `DomainEvent` variant, forget to wire it → compile clean, runtime `UnhandledEventType`.
-	> SuGestion: a `renderer!(EnumName, State, { Variant => fn, ... })` macro that emits a `match self` body so rustc's exhaustiveness lint catches missed variants; or rewrite `Renderer::render` to take a typed `fn(&mut S, E)` and do the runtime `RecordedEvent → E` decode inside, letting `match` enforce exhaustiveness in user code.
+  > SuGestion: a `renderer!(EnumName, State, { Variant => fn, ... })` macro that emits a `match self` body so rustc's exhaustiveness lint catches missed variants; or rewrite `Renderer::render` to take a typed `fn(&mut S, E)` and do the runtime `RecordedEvent → E` decode inside, letting `match` enforce exhaustiveness in user code.
 
 ### service_builder / service
 
 - [ ] **[FOOTGUN]** `src/service_builder.rs:64-79` — `HandlerOutcome::Reload` means "handler returned `()`, the framework reloads from the store." Every ergonomic `Ok(())` silently issues a second `load`.
-	> SuGestion: require handlers to return the new `Entity<S>` explicitly, or document the second-load as load-bearing perf cost.
+  > SuGestion: require handlers to return the new `Entity<S>` explicitly, or document the second-load as load-bearing perf cost.
 - [ ] **[BUG]** `src/service_builder.rs:276-290` — Two `unsafe impl Send` / `unsafe impl Sync` for `BuiltService`. Inner data is `F`/`L`/`Handlers` (already `Send + Sync`) plus `PhantomData<fn() -> _>` (auto-`Send + Sync`). Auto-derived impls would be identical and safe.
-	> SuGestion: delete both `unsafe impl` blocks; if the build still passes, they were dead. If it fails, find and fix the offending field rather than re-asserting the unsafe.
+  > SuGestion: delete both `unsafe impl` blocks; if the build still passes, they were dead. If it fails, find and fix the offending field rather than re-asserting the unsafe.
 - [ ] **[FOOTGUN]** `src/service_builder.rs:266-274` — `BuiltService` fields all `pub` including `_ctx`/`_state`/`_loader_error`/`_handler_error`.
-	> SuGestion: `pub(crate)` if macro-internal; document if genuinely public.
+  > SuGestion: `pub(crate)` if macro-internal; document if genuinely public.
 - [ ] **[ARCH]** `src/service.rs:127-160` + `:170` — `Handles<C>` → `DispatchCommand<C>` → `ServiceState` trait sandwich. `#[diagnostic::on_unimplemented]` is on the wrong traits — users see `Handles<C>` in mismatch errors but the diagnostic lives on `ServiceDefinition` / `HasCommand<C>`.
-	> SuGestion: move the diagnostic to `Handles<C>`; collapse the sandwich if possible.
+  > SuGestion: move the diagnostic to `Handles<C>`; collapse the sandwich if possible.
 - [ ] **[ARCH]** `src/service.rs:197-218` — `TypedService<S>` has redundant `S` type parameter recoverable via `ServiceState<State = S>`.
-	> SuGestion: drop `<S>`, infer everywhere.
+  > SuGestion: drop `<S>`, infer everywhere.
 - [ ] **[FOOTGUN]** `src/handler_env.rs:39-61` — `HandlerEnv: EventStore` blanket impl. Handlers can publish to any aggregate, skipping `Publisher::publish`'s revision guard. (See `crates/sins/src/bin/handler_env_bypasses_publisher.rs` for proof.)
-	> SuGestion: drop the blanket impl; handlers reach the store via `env.store()` so the unusual path is grep-able. For cross-aggregate writes, an explicit `&CrossAggregateStore` capability.
+  > SuGestion: drop the blanket impl; handlers reach the store via `env.store()` so the unusual path is grep-able. For cross-aggregate writes, an explicit `&CrossAggregateStore` capability.
 
 ### Identity & data
 
 - [ ] **[ARCH]** `src/id.rs:13-50` (PARTIAL — `Cow` migration done; `Revision`, `AggregateId.aggregate_key`, and `AggregateType` lifted out of the macro and backed by `Arc<str>` for cheap clone) — `newtype_id!` still emits `PartialOrd, Ord` on `EventType`/`CommandName` where ordering is meaningless, and three near-identical entry points (`new`, `From<String>`, `From<&str>`). `EventType`/`CommandName`/`CorrelationId` still `Cow`-backed; switching them to `Arc<str>` would lose `new_const` (derive-macro-emitted) so deferred.
-	> SuGestion: drop the `Ord`/`PartialOrd` derives on discriminator types; pick one constructor entry point.
+  > SuGestion: drop the `Ord`/`PartialOrd` derives on discriminator types; pick one constructor entry point.
 - [ ] **[FOOTGUN]** `src/id.rs:111-167` — `AggregateId::new("", "")` is accepted; `Display`/`FromStr` round-trip silently re-partitions inputs with embedded `:`. (See `crates/sins/src/bin/aggregate_id_no_roundtrip.rs`.)
-	> SuGestion: validate at construction (reject empty / colon-containing type fragments) or change the wire separator to something neither side legally contains.
+  > SuGestion: validate at construction (reject empty / colon-containing type fragments) or change the wire separator to something neither side legally contains.
 - [ ] **[FOOTGUN]** `src/id.rs:224-238` — `EventType`/`CommandName`/`AggregateType` accept any string despite "kebab-case by convention" doc. (See `crates/sins/src/bin/newtype_id_validates_nothing.rs`.)
-	> SuGestion: `TryFrom<&str>` enforces the convention; `new_const` keeps the no-alloc path for static literals.
+  > SuGestion: `TryFrom<&str>` enforces the convention; `new_const` keeps the no-alloc path for static literals.
 - [ ] **[ARCH]** `src/event.rs:138-141` — `DomainEvent: Serialize + Deserialize + Send + 'static`. Emission only needs `Serialize`.
-	> SuGestion: split `EmitsEvent` / `DecodesEvent`.
+  > SuGestion: split `EmitsEvent` / `DecodesEvent`.
 
 ### Misc core
 
 - [ ] **[ARCH]** `src/lib.rs:24-56` — 60+ re-exports at the crate root, half `#[doc(hidden)]`. Macro-internal types (`Here`, `There`, `HandlerBridge`, `HandlerOutcome`, `__private`, ...) leak into the user-facing namespace.
-	> SuGestion: move all macro-internal types to one `pub mod __macro_support` module; stop using `#[doc(hidden)]` as a privacy modifier.
+  > SuGestion: move all macro-internal types to one `pub mod __macro_support` module; stop using `#[doc(hidden)]` as a privacy modifier.
 - [ ] **[NIT]** `src/lib.rs:60` — `pub mod memory` with one type inside is needless namespacing.
-	> SuGestion: re-export at crate root.
+  > SuGestion: re-export at crate root.
 - [ ] **[NIT]** `src/lib.rs:75-82` — `to_raw_event` free function duplicates one branch of `Publisher::publish`.
-	> SuGestion: make it a method on `RawEvent` or move next to its sole caller.
+  > SuGestion: make it a method on `RawEvent` or move next to its sole caller.
 - [ ] **[FOOTGUN]** `src/memory_store.rs:21` — `Ulid(Box<dyn std::error::Error + Send + Sync>)` boxes a concrete `MonotonicError`.
-	> SuGestion: type the variant: `Ulid(ulid::MonotonicError)`.
+  > SuGestion: type the variant: `Ulid(ulid::MonotonicError)`.
 - [ ] **[BUG]** `src/memory_store.rs:35-39` — `From<serde_json::Error>` always wraps as `EncodeError::Json`, even for decode failures. (See `crates/sins/src/bin/memory_store_decode_labelled_encode.rs`.)
-	> SuGestion: don't have a blanket `From` for ambiguous-direction errors; require the call site to pick `Encode` or `Decode` explicitly.
+  > SuGestion: don't have a blanket `From` for ambiguous-direction errors; require the call site to pick `Encode` or `Decode` explicitly.
 - [ ] **[NIT]** `src/memory_store.rs` — Multiple `expect("...mutex poisoned")` calls on the same mutexes.
-	> SuGestion: wrap in a small `poisoned!` helper.
+  > SuGestion: wrap in a small `poisoned!` helper.
 - [ ] **[BUG]** `src/entity.rs:14-16` — `Entity::initialized() = !revision.is_zero()`. Empty-string revisions report initialized. (See `crates/sins/src/bin/entity_initialised_lies.rs`.)
-	> SuGestion: compute from event count or hold a `bool initialized` field set explicitly on successful first-load.
+  > SuGestion: compute from event count or hold a `bool initialized` field set explicitly on successful first-load.
 - [ ] **[NIT]** `src/aggregate.rs:8` vs `:39-46` — `pub id: AggregateId` field but `events`/`revision` private with accessors. Inconsistent.
-	> SuGestion: pick one — all `pub` or all accessor-only.
+  > SuGestion: pick one — all `pub` or all accessor-only.
 - [ ] **[ARCH]** `src/create.rs:1-70` — Three-step typestate builder. Intermediate structs carry a `service: Service` field discarded at line 67. The builder is a no-op around a static function call.
-	> SuGestion: delete the builder; expose `Service::new(store, services)` directly.
+  > SuGestion: delete the builder; expose `Service::new(store, services)` directly.
 - [ ] **[ARCH]** `src/spec.rs:9-19` + `service_builder.rs` — Two boxed-future type aliases (`HandlerFuture`, `LoaderFuture`, `BoxFuture`) for the same shape.
-	> SuGestion: one alias in one place.
+  > SuGestion: one alias in one place.
 - [ ] **[ARCH]** `src/spec.rs:26-77` — Four traits purely for macro consumption (`HandlerSpec`, `HandlerRuntimeSpec`, `LoaderSpec`, `LoaderRuntimeSpec`) at the crate root.
-	> SuGestion: move to `pub mod __macro_support`.
+  > SuGestion: move to `pub mod __macro_support`.
 - [ ] **[ARCH]** `src/publisher.rs:55-59` — `HasPublisher` trait with one impl.
-	> SuGestion: delete or document why the abstraction.
+  > SuGestion: delete or document why the abstraction.
 - [ ] **[ARCH]** `src/bench_suite.rs` — 600-line bench scaffolding bakes in sharding-model assumptions (`TypeStrategy`, `make_spread_id`, `make_concentrated_id`) that belong in `wee-events-sqlite`.
-	> SuGestion: move sharding-specific bench code to `wee-events-sqlite/benches`. Keep the generic store-trait benches here.
+  > SuGestion: move sharding-specific bench code to `wee-events-sqlite/benches`. Keep the generic store-trait benches here.
 
 ## SQLite crate — `crates/wee-events-sqlite/`
 
 ### Concurrency / correctness
 
 - [ ] **[FOOTGUN]** `src/event_store/store.rs:126-164` + `:250` — `enumerate_aggregates` `try_join_all`s over every known partition unbounded.
-	> SuGestion: bound concurrency via `buffered(N)`; document the cost; recommend a different strategy for enumeration.
+  > SuGestion: bound concurrency via `buffered(N)`; document the cost; recommend a different strategy for enumeration.
 - [ ] **[NIT]** `src/event_store/store.rs:267-275` — `sorted_unique_ids` clones + sorts + dedups O(n log n).
-	> SuGestion: `HashSet<AggregateId>`.
+  > SuGestion: `HashSet<AggregateId>`.
 
 ### Partitioning machinery
 
 - [ ] **[ARCH]** `src/event_store/strategies/*.rs` — Five strategies with near-identical scaffolding; three traits + two marker traits.
-	> SuGestion: collapse to one `PartitionStrategy` trait; delete the marker traits.
+  > SuGestion: collapse to one `PartitionStrategy` trait; delete the marker traits.
 - [ ] **[FOOTGUN]** `src/event_store/strategies/by_aggregate.rs:64-97` + `by_type.rs:61-90` — `partition_from_target_name` runs `SELECT DISTINCT` to recover identity; full table scan per discovery.
-	> SuGestion: rely on `_wee_events_partition_metadata`; drop the fallback.
+  > SuGestion: rely on `_wee_events_partition_metadata`; drop the fallback.
 - [ ] **[ARCH]** `src/event_store/partitioning.rs` — One trait whose every backend delegates to a provisioner. With `BackendBinding`, three layers for one job.
-	> SuGestion: fold catalog into provisioner.
+  > SuGestion: fold catalog into provisioner.
 - [ ] **[FOOTGUN]** `src/event_store/backends/remote.rs:82-115` — `NamedTargetCatalog::partitions` opens a libsql connection per discovered target.
-	> SuGestion: cache.
+  > SuGestion: cache.
 - [ ] **[ARCH]** `src/event_store/types.rs:54-126` — Three marker subtraits with no methods exist only to gate builder methods.
-	> SuGestion: delete the markers.
+  > SuGestion: delete the markers.
 
 ### Turso adapter
 
 - [ ] **[ARCH]** `src/event_store/turso_platform/` (1329 lines) — Hand-rolled HTTP client, name sanitizer, metadata sidecar, infra-mutating `cleanup()`. All in the core SQLite crate.
-	> SuGestion: extract to `wee-events-turso` crate.
+  > SuGestion: extract to `wee-events-turso` crate.
 - [ ] **[BUG]** `src/event_store/turso_platform/mod.rs:122-123, :281` — `cache: Mutex<HashMap>` and `known_names: Mutex<HashSet>` must stay consistent and don't.
-	> SuGestion: one source of truth.
+  > SuGestion: one source of truth.
 - [ ] **[BUG]** `src/event_store/turso_platform/mod.rs:296-314` — `create_database` `AlreadyExists` path unwraps `Some` from `get_database`; TOCTOU against the platform's eventual consistency.
-	> SuGestion: retry/backoff.
+  > SuGestion: retry/backoff.
 
 ### Persistence layer
 
 - [ ] **[BUG]** `src/database.rs:150-184` — Migration's version-write happens outside the BEGIN block; failure mid-migration leaves schema upgraded but unrecorded. Works today only because every DDL is `IF NOT EXISTS`.
-	> SuGestion: bundle DDL + version write into one transaction.
+  > SuGestion: bundle DDL + version write into one transaction.
 - [ ] **[FOOTGUN]** `src/database.rs:171` — `format!("BEGIN;{ddl}")` interpolates DDL strings. Safe today (constants only); invites injection later.
-	> SuGestion: `tx.execute_batch`.
+  > SuGestion: `tx.execute_batch`.
 
 ### Error & ergonomics
 
 - [ ] **[ARCH]** `src/error.rs:1-20` — `Configuration(String)` / `Internal(String)` dumping grounds; Turso `ApiError` variants stringified then string-matched back in `is_lazy_create_partition_not_ready`.
-	> SuGestion: typed `Provisioner(Box<dyn Error>)` / `Api(ApiError)` variants.
+  > SuGestion: typed `Provisioner(Box<dyn Error>)` / `Api(ApiError)` variants.
 - [ ] **[FOOTGUN]** `src/document_store.rs:19-21` — Single `Mutex<Connection>` for all collections + keys.
-	> SuGestion: document as test-only, or pool connections.
+  > SuGestion: document as test-only, or pool connections.
 - [ ] **[BUG]** `src/document_store.rs:51-61` — `upsert` accepts any revision string. A non-ULID lex-smaller revision silently wins the comparison.
-	> SuGestion: type the comparison; reject non-ULID revisions at the boundary.
+  > SuGestion: type the comparison; reject non-ULID revisions at the boundary.
 - [ ] **[BUG]** `src/projections.rs:39-72` — `rebuild_projection` enumerates all aggregate IDs into a `Vec`; unbounded memory, no checkpointing. Concurrent writers between `load` and `upsert` cause lost projections.
-	> SuGestion: paginate; re-check tail aggregates after rebuild.
+  > SuGestion: paginate; re-check tail aggregates after rebuild.
 - [ ] **[ARCH]** `src/projections.rs:7-30` — `apply_projection` is hard-coded to the `SqliteEventStore` default alias.
-	> SuGestion: make it generic.
+  > SuGestion: make it generic.
 
 ### Public surface & tests
 
 - [ ] **[ARCH]** `src/lib.rs:1-20` — ~30 names re-exported flat.
-	> SuGestion: group into `strategy::*` / `partition::*` / `store::*` modules.
+  > SuGestion: group into `strategy::*` / `partition::*` / `store::*` modules.
 - [ ] **[FOOTGUN]** `Cargo.toml:11` + `dev-dependencies` — `turso_platform::sanitize` compiles regardless of feature; `testcontainers` is an unconditional dev-dep.
-	> SuGestion: gate behind an integration feature.
+  > SuGestion: gate behind an integration feature.
 - [ ] **[FOOTGUN]** `Cargo.toml:15` — `libsql = "0.9.29"` against an unstable 0.x.z crate.
-	> SuGestion: pin more aggressively + CI smoke.
+  > SuGestion: pin more aggressively + CI smoke.
 - [ ] **[FOOTGUN]** `tests/conformance.rs:30-152` — `optional_store_test_suite!` early-exits each test when sqld is missing; CI sees green tests that ran zero assertions.
-	> SuGestion: one runner test, or `#[ignore]` semantics.
+  > SuGestion: one runner test, or `#[ignore]` semantics.
 - [ ] **[FOOTGUN]** `tests/conformance.rs:659, :723` — `Box::leak(container)` deliberately leaks testcontainers.
-	> SuGestion: `tokio::sync::OnceCell` with explicit teardown phase.
+  > SuGestion: `tokio::sync::OnceCell` with explicit teardown phase.
 - [ ] **[NIT]** `tests/conformance.rs:34-184` — Huge macro that calls `testing::foo(&store).await` per case.
-	> SuGestion: one `run_suite(store)` function.
+  > SuGestion: one `run_suite(store)` function.
 - [ ] **[BUG]** `tests/multi_process_local.rs` — Misnamed: spins up two stores in **one process**.
-	> SuGestion: rename, or shell out to a second binary.
+  > SuGestion: rename, or shell out to a second binary.
 - [ ] **[NIT]** `tests/documents.rs:71-94` — Hand-rolled temp-file cleanup via Drop, leaks on panic.
-	> SuGestion: `tempfile::tempdir()`.
+  > SuGestion: `tempfile::tempdir()`.
 
 ## Macros — `crates/wee-events-macros/`
 
 - [ ] **[BUG]** `src/lib.rs` + `handler_attr.rs`, `loader_attr.rs`, `capability_attr.rs` — Derive macros emit `wee_events::...` without leading `::`.
-	> SuGestion: rewrite uniformly to `::wee_events::...`.
+  > SuGestion: rewrite uniformly to `::wee_events::...`.
 - [ ] **[ARCH]** `src/lib.rs:200-225` — `extract_prefix` overloads parameter `attr_name` as both attribute identifier and suffix-strip key.
-	> SuGestion: split into two functions.
+  > SuGestion: split into two functions.
 - [ ] **[BUG]** `src/lib.rs:222` — Suffix stripping is conditional; doc says "suffix stripped" without qualification.
-	> SuGestion: fix the doc.
+  > SuGestion: fix the doc.
 - [ ] **[ARCH]** `src/handler_attr.rs:74-256` — Massive copy-paste; same 12-word error string 6× verbatim.
-	> SuGestion: extract `unwrap_result<N>(ty) -> [Type; N]`.
+  > SuGestion: extract `unwrap_result<N>(ty) -> [Type; N]`.
 - [ ] **[BUG]** `src/handler_attr.rs:184, 214` — Silent fallback to `wee_events::Error` when type inference fails.
-	> SuGestion: require explicit `Result<T, E>` or refuse.
+  > SuGestion: require explicit `Result<T, E>` or refuse.
 - [ ] **[BUG]** `src/handler_attr.rs:273-279` — "At least one generic type parameter" check doesn't verify the first param is the context arg type.
-	> SuGestion: parse the signature properly.
+  > SuGestion: parse the signature properly.
 - [ ] **[FOOTGUN]** `src/handler_attr.rs:300, 303` — `{fn_name}_Spec` ident collisions across modules sharing scope.
-	> SuGestion: hygienic ident via `proc_macro2::Span::mixed_site`.
+  > SuGestion: hygienic ident via `proc_macro2::Span::mixed_site`.
 - [ ] **[ARCH]** `src/loader_attr.rs:1-323` — Clone of `handler_attr.rs` minus the command.
-	> SuGestion: share helpers.
+  > SuGestion: share helpers.
 - [ ] **[BUG]** `src/capability_attr.rs:35-43` — Rewrites every fn output uniformly into `impl Future + Send`; sync methods silently become async.
-	> SuGestion: distinguish.
+  > SuGestion: distinguish.
 - [ ] **[FOOTGUN]** `src/capability_attr.rs:53-58` — Receiver restrictions undocumented; error message misleading.
-	> SuGestion: document; improve the message.
+  > SuGestion: document; improve the message.
 - [ ] **[NIT]** `src/service_macro.rs:253-269` — Reinvents `to_snake_case`; `convert_case` is already a dep.
-	> SuGestion: use the existing dep.
+  > SuGestion: use the existing dep.
 - [ ] **[BUG]** `src/service_macro.rs:277-298` — `spec_path` appends `_Spec` to the last segment; re-exports break this.
-	> SuGestion: emit `$path::Spec` (an associated type), or use full-crate paths.
+  > SuGestion: emit `$path::Spec` (an associated type), or use full-crate paths.
 - [ ] **[ARCH]** `src/service_macro.rs:700-708` — `const _: () = { ... }` "assertion" exists "to silence the unused import."
-	> SuGestion: delete.
+  > SuGestion: delete.
 - [ ] **[FOOTGUN]** `src/service_macro.rs:611` — Generated mod uses `use super::*;`.
-	> SuGestion: import specifics.
+  > SuGestion: import specifics.
 - [ ] **[FOOTGUN]** `src/service_macro.rs:825-836` — `__wee_events_handler_0` idents show up in OpenAPI/Restate logs as `handler_3 failed`.
-	> SuGestion: use the source ident.
+  > SuGestion: use the source ident.
 - [ ] **[ARCH]** `src/service_macro.rs:976-1027` — Type-state ladder generates O(2^n) blanket impls.
-	> SuGestion: cap at 4 effects, or rewrite using a single-impl approach.
+  > SuGestion: cap at 4 effects, or rewrite using a single-impl approach.
 - [ ] **[FOOTGUN]** `src/service_macro.rs:807-819` — `Clone + Serialize` added to every command when any effect is declared.
-	> SuGestion: bound only the commands actually filtered.
+  > SuGestion: bound only the commands actually filtered.
 - [ ] **[FOOTGUN]** `src/service_macro.rs:884-902` — Effect-side JSON serialization failure becomes a `TerminalError` mid-execution.
-	> SuGestion: pre-flight serialize before entering the side-effect closure; surface differently.
+  > SuGestion: pre-flight serialize before entering the side-effect closure; surface differently.
 - [ ] **[BUG]** `src/service_macro.rs:341, 457` etc. — `/// Service definition for #name.` literal-token in doc comment; never expands.
-	> SuGestion: `#[doc = format!(...)]`.
+  > SuGestion: `#[doc = format!(...)]`.
 - [ ] **[BUG]** `crates/wee-events-macros/tests/` — Doesn't exist. No `trybuild` UI tests.
-	> SuGestion: add.
+  > SuGestion: add.
 
 ## Restate adapter — `crates/wee-events-restate/`
 
 - [ ] **[BUG]** `src/names.rs:1-11` vs `src/service_macro.rs` — Client constructs `"counter-side-effect-executor"`, server registers as `"counter"` (raw). No e2e test forces them to agree.
-	> SuGestion: write the e2e test; fix whichever side is wrong.
+  > SuGestion: write the e2e test; fix whichever side is wrong.
 - [ ] **[ARCH]** `src/client.rs:30-41` — `executor_name` / `encode_key` / `generate_correlation_id` exist as both private methods and free functions.
-	> SuGestion: one location.
+  > SuGestion: one location.
 - [ ] **[FOOTGUN]** `src/client.rs:48-107` — `execute_idempotent` unreachable via `TypedService`.
-	> SuGestion: expose through the trait or delete.
+  > SuGestion: expose through the trait or delete.
 - [ ] **[BUG]** `src/client.rs:82-97` — Error-body parsing falls back to `Backend(text)` with full response body.
-	> SuGestion: cap size; preserve status code.
+  > SuGestion: cap size; preserve status code.
 - [ ] **[FOOTGUN]** `src/lib.rs:80-87` — `RestateServiceBuilder::with_env` (no store path) uses env as store.
-	> SuGestion: delete; force callers to pass the store explicitly.
+  > SuGestion: delete; force callers to pass the store explicitly.
 - [ ] **[ARCH]** `src/lib.rs:21-39` — `Ready` and `Needs<R, T>` undocumented.
-	> SuGestion: docstrings explaining the typestate.
+  > SuGestion: docstrings explaining the typestate.
 - [ ] **[ARCH]** `src/lib.rs:100-180` — `pub mod __private` re-exports half of `restate_sdk`.
-	> SuGestion: lock to only what generated code needs.
+  > SuGestion: lock to only what generated code needs.
 - [ ] **[NIT]** `src/lib.rs:104` — `pub use restate_sdk::context::Context;` is dead.
-	> SuGestion: drop.
+  > SuGestion: drop.
 - [ ] **[ARCH]** `src/effects.rs:24-69` — `EffectRouter` / `EffectTrigger` exist; nothing uses them.
-	> SuGestion: delete.
+  > SuGestion: delete.
 - [ ] **[ARCH]** `src/types.rs:37-76` — Hand-written serde impls for `EntityResponse` + `ExecuteNotification` with identical bodies.
-	> SuGestion: one `Json<T>` wrapper.
+  > SuGestion: one `Json<T>` wrapper.
 - [ ] **[ARCH]** `src/error.rs:53-60` — `From<ServiceError<E>>` collapses `Store(E)` into `Backend(e.to_string())`.
-	> SuGestion: separate `Store` variant.
+  > SuGestion: separate `Store` variant.
 - [ ] **[NIT]** `src/correlation.rs:13` — Format joins `:`-bearing parts with `-`. Parser-unfriendly.
-	> SuGestion: unambiguous separator.
+  > SuGestion: unambiguous separator.
 - [ ] **[ARCH]** `src/lib.rs:101-179` — `IntoHandlerError` barely used; only implemented for two types.
-	> SuGestion: blanket via `Display`, or remove.
+  > SuGestion: blanket via `Display`, or remove.
 
 ## Workspace / build / docs
 
 - [ ] **[FOOTGUN]** `Cargo.toml:10` — `exclude = ["examples/coroutine-door"]` undocumented.
-	> SuGestion: comment explaining why; add to README.
+  > SuGestion: comment explaining why; add to README.
 - [ ] **[ARCH]** Workspace dep coverage — `bytes`, `nanoid`, `reqwest`, `restate-sdk`, `ulid` not in `[workspace.dependencies]`; `restate-sdk` separately pinned in the example.
-	> SuGestion: hoist into the workspace section.
+  > SuGestion: hoist into the workspace section.
 - [ ] **[ARCH]** `Cargo.toml:24` — `tokio = { features = ["full"] }` workspace-wide.
-	> SuGestion: minimal features per crate.
+  > SuGestion: minimal features per crate.
 - [ ] **[BUG]** `README.md:42-46` — Code sample uses `wee_events::create(...)` which isn't the real API.
-	> SuGestion: fix the sample to match what the macro emits.
+  > SuGestion: fix the sample to match what the macro emits.
 - [ ] **[NIT]** `README.md:8-9` — No explanation of what the Rust port is, why it exists, what's stable.
-	> SuGestion: write a one-paragraph status.
+  > SuGestion: write a one-paragraph status.
 - [ ] **[NIT]** `README.md:22` — Single sentence for the Restate executor surface.
-	> SuGestion: link the `restate-counter` example; show one snippet.
+  > SuGestion: link the `restate-counter` example; show one snippet.
 - [ ] **[BUG]** `README.md` + `wee-events-macros/Cargo.toml` — `TODO: set public repository/homepage/documentation URLs`. No stability disclaimer despite `0.1.0`.
-	> SuGestion: stability disclaimer; set URLs or remove the TODO.
+  > SuGestion: stability disclaimer; set URLs or remove the TODO.
 - [ ] **[BUG]** `justfile:4` — `check: fmt fmt-check ...`. `fmt` mutates files **before** `fmt-check` runs, so the check always passes.
-	> SuGestion: split `check` (read-only: `fmt-check`, `cargo-check`, `clippy`, `test`) from `fix` (mutating: `fmt`).
+  > SuGestion: split `check` (read-only: `fmt-check`, `cargo-check`, `clippy`, `test`) from `fix` (mutating: `fmt`).
 - [ ] **[FOOTGUN]** `justfile:1-19` — No `--locked`, no `nextest`, no `doc` recipe.
-	> SuGestion: add.
+  > SuGestion: add.
 - [ ] **[BUG]** `.github/` — Absent. No CI enforces `just check`.
-	> SuGestion: at minimum a `cargo check --locked --workspace --all-features` + `cargo test --locked` on PR.
+  > SuGestion: at minimum a `cargo check --locked --workspace --all-features` + `cargo test --locked` on PR.
 
 ## Benchmarks — `crates/wee-events/benches/` + `src/bench_suite.rs`
 
 ### Criterion config
 
 - [ ] **[METHOD]** All groups — `Throughput::Elements`/`Bytes` never set.
-	> SuGestion: `group.throughput(Throughput::Elements(n as u64))`.
+  > SuGestion: `group.throughput(Throughput::Elements(n as u64))`.
 
 ### Runtime overhead
 
 - [ ] **[METHOD]** `bench_suite.rs:566` — `Runtime::new()` defaults to multi-thread. For an in-memory store, work-stealing wakeups dominate.
-	> SuGestion: run on `current_thread` *and* `multi_thread`, report delta.
+  > SuGestion: run on `current_thread` *and* `multi_thread`, report delta.
 - [ ] **[METHOD]** `b.to_async(rt).iter(...)` — Per-iteration task spawn.
-	> SuGestion: `iter_custom` with one `block_on` for sub-µs ops.
+  > SuGestion: `iter_custom` with one `block_on` for sub-µs ops.
 
 ### Realism / coverage
 
@@ -262,29 +262,29 @@
 ### Advertised vs reality
 
 - [ ] **[GAP]** `bench_suite.rs:1-19` — Module doc claims about what each group "isolates" are false given the above.
-	> SuGestion: rewrite the doc once the bugs are fixed.
+  > SuGestion: rewrite the doc once the bugs are fixed.
 
 ### NIT
 
 - [ ] **[NIT]** `bench_suite.rs:34` — `LOAD_EVENT_COUNTS` stops at 500.
-	> SuGestion: extend to 100k.
+  > SuGestion: extend to 100k.
 - [ ] **[NIT]** `bench_suite.rs:251-257` — Not-found path grouped under `load_scaling/0`.
-	> SuGestion: own group `bench_load_missing`.
+  > SuGestion: own group `bench_load_missing`.
 
----
+______________________________________________________________________
 
 # Suggested triage order
 
 1. **Verify [BUG] items first** — especially `wee-events-restate` client/server name mismatch, the `Renderer` no-exhaustiveness story, and the `Revision` / `AggregateId` / `Entity::initialized()` unenforced invariants. Each has a runnable sin in `crates/sins/` proving the gap.
-2. **Cut error sprawl.** Pick a real domain-vs-infrastructure boundary (probably `EventStore::Error = wee_events::Error` with `Custom(Box<dyn Error>)`) and delete every `into_store_error` helper. The `From` cycles fall out on their own.
-3. **Delete what isn't earning its keep.** `service_builder` HList, codec HList, marker subtraits in sqlite strategies, `create.rs` builder chain, `EffectRouter` in restate, `Handles<C>` sandwich.
-4. **Replace `join_all` with `JoinSet`** in the bench suite. Without this, every "concurrent" bench is fiction.
-5. **Move turso adapter out of `wee-events-sqlite`** into its own crate.
-6. **Add trybuild + UI tests for the macros.**
-7. **Fix the `justfile`** so `fmt-check` actually checks.
-8. **Cosmetic / NITs** last.
+1. **Cut error sprawl.** Pick a real domain-vs-infrastructure boundary (probably `EventStore::Error = wee_events::Error` with `Custom(Box<dyn Error>)`) and delete every `into_store_error` helper. The `From` cycles fall out on their own.
+1. **Delete what isn't earning its keep.** `service_builder` HList, codec HList, marker subtraits in sqlite strategies, `create.rs` builder chain, `EffectRouter` in restate, `Handles<C>` sandwich.
+1. **Replace `join_all` with `JoinSet`** in the bench suite. Without this, every "concurrent" bench is fiction.
+1. **Move turso adapter out of `wee-events-sqlite`** into its own crate.
+1. **Add trybuild + UI tests for the macros.**
+1. **Fix the `justfile`** so `fmt-check` actually checks.
+1. **Cosmetic / NITs** last.
 
----
+______________________________________________________________________
 
 # Done
 
@@ -354,7 +354,7 @@ Completed in this branch. Details (was → is, bench evidence) in `tradeoffs-mad
 
 - [x] **[BUG]** `src/event_store/store.rs:187-232` — `ensure_partition_open` / `open_partition_if_exists` race: lock now held across the whole open + prepare + insert phase, so concurrent first-time openers serialise; second caller observes the cached connection. Closes the local-sqlite migration-DDL collision (was the root cause of bench `bwj88ka8g` SQLITE_BUSY panic) and the Turso `create_database` double-fire concern.
 - [x] **[BUG]** `src/event_store/store.rs:633-653` — Lazy-partition-not-ready detector no longer string-matches over the *entire* `libsql::Error` Display; now narrowed to remote-transport variants only (`Hrana`, `WriteDelegation`, `ConnectionFailed`). Phrase tolerance widened to also accept `does not exist`, `not found`, and `404`. Local sqlite errors can no longer accidentally match. Still string-based — sqld returns 404+JSON, not a code — comment documents the upstream fragility.
-- [x] **[BUG]** `src/event_store/store.rs` — Retry jitter migrated from `SystemTime::subsec_nanos()` (phase-locks under contention) to a process-global atomic xorshift64* PRNG (`next_jitter`). Seeded from system time on first call, advances lock-free with Relaxed ordering. Both `retry_delay` (conflict-retry) and `busy_retry_delay` (BUSY/LOCKED) use it. No new deps.
+- [x] **[BUG]** `src/event_store/store.rs` — Retry jitter migrated from `SystemTime::subsec_nanos()` (phase-locks under contention) to a process-global atomic xorshift64\* PRNG (`next_jitter`). Seeded from system time on first call, advances lock-free with Relaxed ordering. Both `retry_delay` (conflict-retry) and `busy_retry_delay` (BUSY/LOCKED) use it. No new deps.
 - [x] **[NIT]** `src/event_store/store.rs:1006-1073` — three `format!`-built INSERT statements replaced by three `const &'static str` (`SQL_INITIAL`, `SQL_EXACT`, `SQL_ADVANCE`). No per-call concatenation.
 - [x] **[BUG]** `event_store/store.rs` connection cache race — `ensure_partition_open` / `open_partition_if_exists` dropped the `connections` lock between the negative lookup and the insert, so concurrent first-time opens both ran migration DDL on independent connections → `SqliteFailure(5, "database is locked")` panics during bench warmup. Fixed: hold `connections.lock()` across the whole open + prepare + insert phase; second caller now sees the cached connection. Defence in depth: BUSY/LOCKED retry loop around `try_publish_once` (8 attempts, 5→250ms backoff + jitter, independent of conflict-retry counter); `busy_timeout` raised 5s → 30s. Verified: `local_by_type/creation/concentrated/{2..32}` runs to completion (bench `b2uc3dn1t`).
 

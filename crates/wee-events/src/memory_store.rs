@@ -120,14 +120,17 @@ impl MemoryStore {
         // yet and the caller demanded a non-zero expected_revision, fail
         // *before* inserting an empty entry — otherwise a failed publish
         // leaves a phantom aggregate visible to `enumerate_aggregates()`.
-        let stream = if let Some(e) = self.backing.streams.get(aggregate_id) { Arc::clone(e.value()) } else {
+        let stream = if let Some(e) = self.backing.streams.get(aggregate_id) {
+            Arc::clone(e.value())
+        } else {
             if let Some(expected) = &options.expected_revision
-                && !expected.is_zero() {
-                    return Err(Error::RevisionConflict {
-                        expected: expected.clone(),
-                        actual: Revision::zero(),
-                    });
-                }
+                && !expected.is_zero()
+            {
+                return Err(Error::RevisionConflict {
+                    expected: expected.clone(),
+                    actual: Revision::zero(),
+                });
+            }
             self.stream_for(aggregate_id)
         };
         let mut events_guard = stream.write();

@@ -323,11 +323,7 @@ where
     }
 
     /// Execute a typed command via direct `HList` dispatch.
-    pub async fn execute<C, Idx>(
-        &self,
-        id: AggregateId,
-        cmd: C,
-    ) -> Result<Entity<S>, EH>
+    pub async fn execute<C, Idx>(&self, id: AggregateId, cmd: C) -> Result<Entity<S>, EH>
     where
         C: Command + Send + 'static,
         Handlers: HandleCommand<C, Idx, Ctx, S, EH>,

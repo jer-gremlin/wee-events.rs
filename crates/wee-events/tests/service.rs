@@ -1,3 +1,6 @@
+//! Explicit `impl Future + Send` on trait impls is deliberate; not desugarable.
+#![allow(clippy::manual_async_fn)]
+
 use std::convert::Infallible;
 use std::future::Future;
 

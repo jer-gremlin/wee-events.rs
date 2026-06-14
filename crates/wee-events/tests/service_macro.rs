@@ -7,6 +7,9 @@
 //! names and derives the command types and capability requirements from the
 //! companion `HandlerSpec`/`LoaderSpec` items.
 
+// handler/loader bodies are async by macro contract; they need not await
+#![allow(clippy::unused_async)]
+
 use wee_events::{AggregateId, Command, Entity, Handles, Revision, TypedService};
 
 // ---------------------------------------------------------------------------
@@ -121,7 +124,8 @@ wee_events::service! {
 struct AppCtx;
 
 impl HasStore for AppCtx {
-    fn store_info(&self) -> &str {
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn store_info(&self) -> &'static str {
         "in-memory"
     }
 }

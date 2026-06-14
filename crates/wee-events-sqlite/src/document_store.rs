@@ -107,8 +107,9 @@ impl DocumentStore {
 
             documents.push(Document {
                 key,
-                revision: Revision::try_from(revision)
-                .map_err(|e| Error::Internal(format!("document row has invalid revision: {e}")))?,
+                revision: Revision::try_from(revision).map_err(|e| {
+                    Error::Internal(format!("document row has invalid revision: {e}"))
+                })?,
                 data: value,
             });
         }

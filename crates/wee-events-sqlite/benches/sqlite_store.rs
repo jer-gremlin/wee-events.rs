@@ -1,4 +1,4 @@
-//! Comprehensive performance benchmarks for all SQLite store variants and
+//! Comprehensive performance benchmarks for all `SQLite` store variants and
 //! partitioning strategies.
 
 use std::collections::HashSet;
@@ -313,9 +313,7 @@ async fn open_sqld_default_store_with_retry(
         match SqliteEventStore::open_sqld_default(provisioner.clone(), strategy).await {
             Ok(store) => return store,
             Err(error) => {
-                if Instant::now() >= deadline {
-                    panic!("sqld default did not become ready in time: {error}");
-                }
+                assert!(Instant::now() < deadline, "sqld default did not become ready in time: {error}");
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
@@ -335,9 +333,7 @@ where
         match SqliteEventStore::open_sqld_namespaced(provisioner.clone(), strategy.clone()).await {
             Ok(store) => return store,
             Err(error) => {
-                if Instant::now() >= deadline {
-                    panic!("sqld did not become ready in time: {error}");
-                }
+                assert!(Instant::now() < deadline, "sqld did not become ready in time: {error}");
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
@@ -356,9 +352,7 @@ where
         match store.load(&probe).await {
             Ok(_) => return,
             Err(error) => {
-                if Instant::now() >= deadline {
-                    panic!("remote sqld did not become ready in time: {error}");
-                }
+                assert!(Instant::now() < deadline, "remote sqld did not become ready in time: {error}");
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }

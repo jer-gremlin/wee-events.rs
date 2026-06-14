@@ -378,7 +378,8 @@ fn generate_full(service: FullServiceInput) -> TokenStream2 {
     // Effective Restate method name for the loader.
     let loader_wire_name = loader_entry
         .wire_name
-        .as_ref().map_or_else(|| "load".to_string(), syn::LitStr::value);
+        .as_ref()
+        .map_or_else(|| "load".to_string(), syn::LitStr::value);
 
     // Effective Restate method name for each handler, in input order.
     let handler_wire_names: Vec<String> = handler_entries

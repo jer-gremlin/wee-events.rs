@@ -71,6 +71,7 @@ fn reduce_decremented(
     Ok(())
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn reduce_reset(
     state: &mut CounterState,
     _event_type: &EventType,
