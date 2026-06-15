@@ -87,36 +87,11 @@ impl MemoryStore {
         aggregate_id: &AggregateId,
         options: PublishOptions,
         events: Vec<RawEvent>,
-        minted: Vec<(EventId, Revision)>,
     ) -> Result<ChangeSet, Error> {
         let metadata = EventMetadata {
             causation_id: options.causation_id,
             correlation_id: options.correlation_id,
         };
-
-        // Build each `RecordedEvent` once, wrap in `Arc`, push the same `Arc`
-        // into both the store-side stream and the returned `ChangeSet`. One
-        // allocation per event; the store retains and the caller observes via
-        // refcount bumps.
-        let recorded: Vec<Arc<RecordedEvent>> = events
-            .into_iter()
-            .zip(minted)
-            .map(|(raw, (event_id, revision))| {
-                Arc::new(RecordedEvent {
-                    event_id,
-                    event_type: raw.event_type,
-                    revision,
-                    metadata: metadata.clone(),
-                    data: raw.data,
-                })
-            })
-            .collect();
-
-        let revision = recorded
-            .last()
-            .expect("recorded is non-empty: events.is_empty() was false")
-            .revision
-            .clone();
 
         // Resolve the per-aggregate stream. If the aggregate doesn't exist
         // yet and the caller demanded a non-zero expected_revision, fail
@@ -153,6 +128,35 @@ impl MemoryStore {
                 });
             }
         }
+
+        // Mint while holding the write guard so revisions are appended in the
+        // order they are minted — concurrent publishes to this aggregate
+        // serialize here, keeping the stream monotonic.
+        let minted = self.mint_event_ids(events.len())?;
+
+        // Build each `RecordedEvent` once, wrap in `Arc`, push the same `Arc`
+        // into both the store-side stream and the returned `ChangeSet`. One
+        // allocation per event; the store retains and the caller observes via
+        // refcount bumps.
+        let recorded: Vec<Arc<RecordedEvent>> = events
+            .into_iter()
+            .zip(minted)
+            .map(|(raw, (event_id, revision))| {
+                Arc::new(RecordedEvent {
+                    event_id,
+                    event_type: raw.event_type,
+                    revision,
+                    metadata: metadata.clone(),
+                    data: raw.data,
+                })
+            })
+            .collect();
+
+        let revision = recorded
+            .last()
+            .expect("recorded is non-empty: events.is_empty() was false")
+            .revision
+            .clone();
 
         events_guard.extend(recorded.iter().cloned());
 
@@ -251,11 +255,7 @@ impl EventStore for MemoryStore {
             });
         }
 
-        // Mint ULIDs first (generator lock only), then take the streams lock
-        // with all IDs already in hand — no nested locks, no .await between
-        // the two acquisitions.
-        let minted = self.mint_event_ids(events.len())?;
-        self.publish_sync(aggregate_id, options, events, minted)
+        self.publish_sync(aggregate_id, options, events)
     }
 }
 

@@ -23,12 +23,11 @@ pub struct RawEvent {
 /// Domain-agnostic event store. A single store instance serves all aggregates —
 /// load and publish take `AggregateId` as a parameter.
 ///
-/// Implementors provide the persistence mechanism (in-memory, `SQLite`, etc.)
-/// and choose their own error type via `type Error`. The error type must be
-/// convertible from `crate::Error` so that structural failures (revision
-/// conflicts, encoding mismatches, retry exhaustion) flow through unchanged;
-/// backend-specific failures should be wrapped through `Error::Custom(...)`
-/// rather than added to the trait bound.
+/// Implementors provide the persistence mechanism (in-memory, `SQLite`, etc.).
+/// The error type is fixed to `crate::Error`: structural failures (revision
+/// conflicts, encoding mismatches, retry exhaustion) are already represented
+/// there, and backend-specific failures should be wrapped through
+/// `Error::Custom(...)` to flow through that unified type.
 ///
 /// This trait is intended for static dispatch. Methods return `Send` futures so
 /// generated durable adapters can hold store references across async boundaries.

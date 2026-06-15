@@ -151,8 +151,8 @@ impl FromStr for Revision {
         if s.len() != 26 {
             return Err(RevisionParseError::WrongLength(s.len()));
         }
-        Ulid::from_string(s).map_err(RevisionParseError::InvalidUlid)?;
-        Ok(Self(Arc::from(s)))
+        let ulid = Ulid::from_string(s).map_err(RevisionParseError::InvalidUlid)?;
+        Ok(Self::from_ulid(ulid))
     }
 }
 
