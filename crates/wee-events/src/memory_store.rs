@@ -42,8 +42,10 @@ impl MemoryStore {
     }
 
     /// Mints `count` paired `(EventId, Revision)` ULIDs in a single
-    /// acquisition of the generator lock. Generator lock is released before
-    /// the caller touches the streams shard — no lock-in-lock ordering.
+    /// acquisition of the generator lock. Called while the per-aggregate
+    /// stream write lock is held, so minted revisions are written before any
+    /// concurrent publish to the same aggregate can mint — ordering is
+    /// monotonic. Lock order is always stream-write then generator.
     fn mint_event_ids(&self, count: usize) -> Result<Vec<(EventId, Revision)>, Error> {
         let mut generator = self.backing.generator.lock();
         let mut out = Vec::with_capacity(count);
