@@ -20,10 +20,13 @@
 //!   C `concurrent_batched`   — the shipped `rebuild_projection`: list once, fan out, one batched write
 //! A→B isolates the load-concurrency win; B→C isolates the read-once + batched-write win.
 
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures_util::stream::{self, StreamExt, TryStreamExt};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use wee_events::{
@@ -31,7 +34,9 @@ use wee_events::{
     RawEvent, ReduceFn, Renderer,
 };
 use wee_events_sqlite::{
-    DocumentStore, Error, GlobalStrategy, ProjectionSource, SqliteEventStore, rebuild_projection,
+    AggregateStrategy, DatabaseTarget, DocumentStore, Error, GlobalStrategy,
+    NamedTargetProvisioner, PartitionName, ProjectionSource, SqldNamespacedProvisioner,
+    SqliteEventStore, rebuild_projection,
 };
 
 const EVENTS_PER_AGGREGATE: usize = 8;
@@ -265,5 +270,188 @@ fn bench_rebuild(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_rebuild);
+// ---------------------------------------------------------------------------
+// Real sqld arm — runs only when SQLD_URL is set (see scripts/sqld.sh).
+// One namespace per aggregate (AggregateStrategy), so concurrent loads hit
+// independent connections and overlap real round-trips.
+// ---------------------------------------------------------------------------
+
+fn sanitize(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c.to_ascii_lowercase(),
+            _ => '-',
+        })
+        .collect()
+}
+
+#[derive(Clone)]
+struct BenchSqldProvisioner {
+    url: String,
+    admin_url: String,
+    known: Arc<Mutex<HashSet<String>>>,
+    client: reqwest::Client,
+}
+
+impl BenchSqldProvisioner {
+    fn new(url: String, admin_url: String) -> Self {
+        Self {
+            url,
+            admin_url,
+            known: Arc::new(Mutex::new(HashSet::new())),
+            client: reqwest::Client::new(),
+        }
+    }
+
+    fn target(&self, name: PartitionName<'_>) -> DatabaseTarget {
+        match name {
+            PartitionName::Named(name) => DatabaseTarget::SqldNamespace {
+                url: self.url.clone(),
+                auth_token: String::new(),
+                namespace: format!("bench-{}", sanitize(name)),
+            },
+            PartitionName::Default => DatabaseTarget::SqldDefault {
+                url: self.url.clone(),
+                auth_token: String::new(),
+            },
+        }
+    }
+}
+
+impl NamedTargetProvisioner for BenchSqldProvisioner {
+    async fn ensure_target_for_name(
+        &self,
+        name: PartitionName<'_>,
+    ) -> Result<DatabaseTarget, Error> {
+        let PartitionName::Named(named) = name else {
+            return Ok(self.target(PartitionName::Default));
+        };
+        let target = self.target(PartitionName::Named(named));
+        if self.known.lock().unwrap().contains(named) {
+            return Ok(target);
+        }
+
+        let namespace = format!("bench-{}", sanitize(named));
+        let response = self
+            .client
+            .post(format!(
+                "{}/v1/namespaces/{namespace}/create",
+                self.admin_url
+            ))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .map_err(|e| Error::Internal(format!("sqld admin create failed: {e}")))?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let exists = status == StatusCode::BAD_REQUEST && body.contains("already exists");
+        if !matches!(
+            status,
+            StatusCode::OK | StatusCode::CREATED | StatusCode::CONFLICT
+        ) && !exists
+        {
+            return Err(Error::Internal(format!(
+                "sqld create namespace failed ({status}): {body}"
+            )));
+        }
+
+        self.known.lock().unwrap().insert(named.to_string());
+        Ok(target)
+    }
+
+    async fn target_for_existing_name(
+        &self,
+        name: PartitionName<'_>,
+    ) -> Result<Option<DatabaseTarget>, Error> {
+        let PartitionName::Named(named) = name else {
+            return Ok(Some(self.target(PartitionName::Default)));
+        };
+        Ok(self
+            .known
+            .lock()
+            .unwrap()
+            .contains(named)
+            .then(|| self.target(PartitionName::Named(named))))
+    }
+
+    async fn names(&self) -> Result<Vec<String>, Error> {
+        Ok(self.known.lock().unwrap().iter().cloned().collect())
+    }
+}
+
+impl SqldNamespacedProvisioner for BenchSqldProvisioner {}
+
+fn bench_rebuild_sqld(c: &mut Criterion) {
+    let Ok(url) = std::env::var("SQLD_URL") else {
+        eprintln!("SQLD_URL not set — skipping real sqld rebuild bench (run scripts/sqld.sh up).");
+        return;
+    };
+    let admin_url =
+        std::env::var("SQLD_ADMIN_URL").unwrap_or_else(|_| url.replace(":8080", ":9090"));
+    let n: usize = std::env::var("SQLD_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100);
+
+    let rt = Runtime::new().unwrap();
+    let renderer = counter_renderer();
+    let renderer = &renderer;
+    let aggregate_type = AggregateType::new("counter");
+    let aggregate_type = &aggregate_type;
+
+    let store = rt.block_on(async {
+        let provisioner = BenchSqldProvisioner::new(url.clone(), admin_url.clone());
+        let store = SqliteEventStore::open_sqld_namespaced(provisioner, AggregateStrategy)
+            .await
+            .expect("open sqld namespaced store");
+        let events: Vec<RawEvent> = (0..EVENTS_PER_AGGREGATE).map(|_| make_event()).collect();
+        for index in 0..n {
+            let id = AggregateId::new("counter", format!("c{index}"));
+            store
+                .publish(&id, PublishOptions::default(), events.clone())
+                .await
+                .expect("seed publish should succeed");
+        }
+        store
+    });
+    let store = &store;
+
+    let mut group = c.benchmark_group("projection/rebuild/sqld");
+    group.sample_size(10);
+
+    group.bench_function(format!("sequential/n{n}"), |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                let docs = DocumentStore::open_in_memory().await.unwrap();
+                let start = Instant::now();
+                rebuild_sequential(renderer, store, &docs, "counters", aggregate_type)
+                    .await
+                    .unwrap();
+                total += start.elapsed();
+            }
+            total
+        });
+    });
+
+    group.bench_function(format!("concurrent_batched/n{n}"), |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                let docs = DocumentStore::open_in_memory().await.unwrap();
+                let start = Instant::now();
+                rebuild_projection(renderer, store, &docs, "counters", aggregate_type)
+                    .await
+                    .unwrap();
+                total += start.elapsed();
+            }
+            total
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_rebuild, bench_rebuild_sqld);
 criterion_main!(benches);
