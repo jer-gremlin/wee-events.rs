@@ -313,7 +313,10 @@ async fn open_sqld_default_store_with_retry(
         match SqliteEventStore::open_sqld_default(provisioner.clone(), strategy).await {
             Ok(store) => return store,
             Err(error) => {
-                assert!(Instant::now() < deadline, "sqld default did not become ready in time: {error}");
+                assert!(
+                    Instant::now() < deadline,
+                    "sqld default did not become ready in time: {error}"
+                );
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
@@ -333,7 +336,10 @@ where
         match SqliteEventStore::open_sqld_namespaced(provisioner.clone(), strategy.clone()).await {
             Ok(store) => return store,
             Err(error) => {
-                assert!(Instant::now() < deadline, "sqld did not become ready in time: {error}");
+                assert!(
+                    Instant::now() < deadline,
+                    "sqld did not become ready in time: {error}"
+                );
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
@@ -352,7 +358,10 @@ where
         match store.load(&probe).await {
             Ok(_) => return,
             Err(error) => {
-                assert!(Instant::now() < deadline, "remote sqld did not become ready in time: {error}");
+                assert!(
+                    Instant::now() < deadline,
+                    "remote sqld did not become ready in time: {error}"
+                );
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
