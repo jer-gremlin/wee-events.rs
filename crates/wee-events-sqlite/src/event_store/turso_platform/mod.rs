@@ -268,7 +268,6 @@ impl<A: TursoPlatformApi, M: PartitionMetadataStore> TursoPlatformProvisionerImp
     }
 }
 
-#[allow(private_bounds)]
 impl<A: TursoPlatformApi, M: PartitionMetadataStore> NamedTargetProvisioner
     for TursoPlatformProvisionerImpl<A, M>
 {
@@ -416,7 +415,6 @@ impl<A: TursoPlatformApi, M: PartitionMetadataStore> NamedTargetProvisioner
     }
 }
 
-#[allow(private_bounds)]
 impl<A: TursoPlatformApi, M: PartitionMetadataStore> TursoProvisioner
     for TursoPlatformProvisionerImpl<A, M>
 {

@@ -3,7 +3,6 @@
 //! are consumed by the Restate binder (Task 7); here we only prove parse
 //! success and no regression on the core in-process path.
 
-#![allow(dead_code)]
 // handler/loader bodies are async by macro contract; they need not await
 #![allow(clippy::unused_async)]
 

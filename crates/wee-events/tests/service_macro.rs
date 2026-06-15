@@ -1,6 +1,5 @@
 //! Tests for the rewritten `service!` macro.
 
-#![allow(dead_code)]
 //!
 //! Handlers and loaders are annotated with `#[handler]`/`#[loader]` and are
 //! generic over a context type `R`. The `service!` macro consumes bare function
@@ -124,7 +123,6 @@ wee_events::service! {
 struct AppCtx;
 
 impl HasStore for AppCtx {
-    #[allow(clippy::unnecessary_literal_bound)]
     fn store_info(&self) -> &'static str {
         "in-memory"
     }

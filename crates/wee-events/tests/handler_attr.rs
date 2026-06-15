@@ -90,7 +90,6 @@ fn handler_requires_trait_generated() {
 fn loader_requires_trait_generated() {
     struct TestCtx;
     impl HasStore for TestCtx {
-        #[allow(clippy::unnecessary_literal_bound)]
         fn store_name(&self) -> &'static str {
             "test"
         }
