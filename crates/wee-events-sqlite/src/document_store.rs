@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use libsql::Connection;
+use libsql::{Connection, TransactionBehavior};
 use tokio::sync::Mutex;
 use wee_events::Revision;
 
@@ -58,6 +58,44 @@ impl DocumentStore {
         )
         .await
         .map_err(Into::into)
+    }
+
+    /// Upserts many documents in a single transaction. Each entry follows the
+    /// same revision-aware semantics as [`upsert`](Self::upsert); a stale
+    /// revision for any key is a silent no-op. Returns the number of rows
+    /// actually written. Batching collapses N round-trips/fsyncs into one
+    /// transaction — the win scales with write latency.
+    pub async fn upsert_many(
+        &self,
+        collection: &str,
+        entries: &[(String, Revision, serde_json::Value)],
+    ) -> Result<u64, Error> {
+        if entries.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.conn.lock().await;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await?;
+
+        let mut written = 0;
+        for (key, revision, data) in entries {
+            let json_str = serde_json::to_string(data)?;
+            written += tx
+                .execute(
+                    "INSERT INTO documents (collection, key, revision, data)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT (collection, key) DO UPDATE
+                         SET revision = excluded.revision, data = excluded.data
+                         WHERE excluded.revision > documents.revision",
+                    (collection, key.as_str(), revision.as_str(), json_str),
+                )
+                .await?;
+        }
+
+        tx.commit().await?;
+        Ok(written)
     }
 
     /// Retrieves a single document by collection and key.

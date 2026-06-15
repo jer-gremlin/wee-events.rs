@@ -17,4 +17,4 @@ pub use event_store::{
     SingleTargetProvisioner, SqldDefaultProvisioner, SqldNamespacedPartitionStrategy,
     SqldNamespacedProvisioner, SqliteEventStore, TursoProvisioner, TypePartition, TypeStrategy,
 };
-pub use projections::{apply_projection, rebuild_projection};
+pub use projections::{ProjectionSource, apply_projection, rebuild_projection};
